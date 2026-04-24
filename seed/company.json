@@ -1,0 +1,562 @@
+{
+  "company": {
+    "name": "Pantalasa",
+    "tagline": "Building the ocean of connected commerce for the modern enterprise.",
+    "summary": "Pantalasa is a global fintech infrastructure company that provides end-to-end payment processing, data analytics, and merchant services. Founded in 2018, we power transactions for over 50,000 businesses across 40 countries, processing billions in annual volume through our unified commerce platform."
+  },
+  "domains": {
+    "platform": {
+      "owner": "carlos.mendez@pantalasa.org",
+      "description": "Core platform services including API gateway, authentication, and service mesh",
+      "children": [
+        "api-gateway",
+        "auth",
+        "service-mesh"
+      ]
+    },
+    "product": {
+      "owner": "sarah.chen@pantalasa.org",
+      "description": "Customer-facing product development and merchant dashboard experiences",
+      "children": [
+        "merchant-dashboard",
+        "checkout",
+        "onboarding",
+        "developer-portal"
+      ]
+    },
+    "data": {
+      "owner": "priya.sharma@pantalasa.org",
+      "description": "Data infrastructure, warehousing, analytics pipelines, and business intelligence",
+      "children": [
+        "warehouse",
+        "pipelines",
+        "analytics"
+      ]
+    },
+    "security": {
+      "owner": "marcus.williams@pantalasa.org",
+      "description": "Security operations, compliance, fraud detection, and identity verification",
+      "children": [
+        "compliance",
+        "fraud-detection",
+        "identity"
+      ]
+    },
+    "infra": {
+      "owner": "elena.kowalski@pantalasa.org",
+      "description": "Cloud infrastructure, Kubernetes orchestration, and site reliability engineering",
+      "children": [
+        "kubernetes",
+        "cloud-ops",
+        "sre",
+        "networking"
+      ]
+    },
+    "payments": {
+      "owner": "james.okonkwo@pantalasa.org",
+      "description": "Core payment processing, settlement, and integration with payment networks",
+      "children": [
+        "processing",
+        "settlement",
+        "card-networks"
+      ]
+    },
+    "growth": {
+      "owner": "maria.santos@pantalasa.org",
+      "description": "Growth engineering, experimentation platform, and customer acquisition tools",
+      "children": [
+        "experimentation",
+        "acquisition",
+        "lifecycle"
+      ]
+    },
+    "ml": {
+      "owner": "david.zhang@pantalasa.org",
+      "description": "Machine learning platform, model serving, and AI-powered features",
+      "children": [
+        "model-serving",
+        "feature-store",
+        "recommendations"
+      ]
+    },
+    "mobile": {
+      "owner": "anna.petrov@pantalasa.org",
+      "description": "Mobile SDK development and native applications for iOS and Android",
+      "children": [
+        "ios-sdk",
+        "android-sdk",
+        "react-native"
+      ]
+    },
+    "tooling": {
+      "owner": "kevin.murphy@pantalasa.org",
+      "description": "Internal developer tooling, CI/CD pipelines, and developer productivity",
+      "children": [
+        "ci-cd",
+        "dev-environments",
+        "observability"
+      ]
+    }
+  },
+  "people": [
+    {
+      "email": "carlos.mendez@pantalasa.org",
+      "name": "Carlos Mendez",
+      "title": "VP of Platform Engineering",
+      "domains": [
+        "platform.api-gateway",
+        "platform.service-mesh"
+      ]
+    },
+    {
+      "email": "sarah.chen@pantalasa.org",
+      "name": "Sarah Chen",
+      "title": "Chief Product Officer",
+      "domains": [
+        "product.merchant-dashboard",
+        "product.checkout"
+      ]
+    },
+    {
+      "email": "priya.sharma@pantalasa.org",
+      "name": "Priya Sharma",
+      "title": "Head of Data Engineering",
+      "domains": [
+        "data.warehouse",
+        "data.pipelines"
+      ]
+    },
+    {
+      "email": "marcus.williams@pantalasa.org",
+      "name": "Marcus Williams",
+      "title": "Chief Security Officer",
+      "domains": [
+        "security.compliance",
+        "security.fraud-detection"
+      ]
+    },
+    {
+      "email": "elena.kowalski@pantalasa.org",
+      "name": "Elena Kowalski",
+      "title": "VP of Infrastructure",
+      "domains": [
+        "infra.kubernetes",
+        "infra.cloud-ops"
+      ]
+    },
+    {
+      "email": "james.okonkwo@pantalasa.org",
+      "name": "James Okonkwo",
+      "title": "Head of Payments",
+      "domains": [
+        "payments.processing",
+        "payments.settlement"
+      ]
+    },
+    {
+      "email": "maria.santos@pantalasa.org",
+      "name": "Maria Santos",
+      "title": "VP of Growth",
+      "domains": [
+        "growth.experimentation",
+        "growth.acquisition"
+      ]
+    },
+    {
+      "email": "david.zhang@pantalasa.org",
+      "name": "David Zhang",
+      "title": "Head of Machine Learning",
+      "domains": [
+        "ml.model-serving",
+        "ml.feature-store"
+      ]
+    },
+    {
+      "email": "anna.petrov@pantalasa.org",
+      "name": "Anna Petrov",
+      "title": "Mobile Engineering Lead",
+      "domains": [
+        "mobile.ios-sdk",
+        "mobile.android-sdk"
+      ]
+    },
+    {
+      "email": "kevin.murphy@pantalasa.org",
+      "name": "Kevin Murphy",
+      "title": "Director of Developer Experience",
+      "domains": [
+        "tooling.ci-cd",
+        "tooling.dev-environments"
+      ]
+    },
+    {
+      "email": "lisa.nguyen@pantalasa.org",
+      "name": "Lisa Nguyen",
+      "title": "Senior Platform Engineer",
+      "domains": [
+        "platform.api-gateway",
+        "platform.auth"
+      ]
+    },
+    {
+      "email": "ahmed.hassan@pantalasa.org",
+      "name": "Ahmed Hassan",
+      "title": "Staff Engineer",
+      "domains": [
+        "platform.service-mesh",
+        "infra.networking"
+      ]
+    },
+    {
+      "email": "jennifer.taylor@pantalasa.org",
+      "name": "Jennifer Taylor",
+      "title": "Product Manager",
+      "domains": [
+        "product.onboarding",
+        "product.developer-portal"
+      ]
+    },
+    {
+      "email": "michael.brown@pantalasa.org",
+      "name": "Michael Brown",
+      "title": "Senior Product Engineer",
+      "domains": [
+        "product.checkout",
+        "product.merchant-dashboard"
+      ]
+    },
+    {
+      "email": "rachel.kim@pantalasa.org",
+      "name": "Rachel Kim",
+      "title": "Data Engineer",
+      "domains": [
+        "data.pipelines",
+        "data.analytics"
+      ]
+    },
+    {
+      "email": "daniel.garcia@pantalasa.org",
+      "name": "Daniel Garcia",
+      "title": "Senior Data Analyst",
+      "domains": [
+        "data.analytics",
+        "data.warehouse"
+      ]
+    },
+    {
+      "email": "stephanie.wright@pantalasa.org",
+      "name": "Stephanie Wright",
+      "title": "Security Engineer",
+      "domains": [
+        "security.identity",
+        "security.compliance"
+      ]
+    },
+    {
+      "email": "robert.jackson@pantalasa.org",
+      "name": "Robert Jackson",
+      "title": "Fraud Analyst",
+      "domains": [
+        "security.fraud-detection",
+        "ml.recommendations"
+      ]
+    },
+    {
+      "email": "amanda.lee@pantalasa.org",
+      "name": "Amanda Lee",
+      "title": "SRE Lead",
+      "domains": [
+        "infra.sre",
+        "infra.kubernetes"
+      ]
+    },
+    {
+      "email": "christopher.davis@pantalasa.org",
+      "name": "Christopher Davis",
+      "title": "Cloud Engineer",
+      "domains": [
+        "infra.cloud-ops",
+        "infra.networking"
+      ]
+    },
+    {
+      "email": "michelle.rodriguez@pantalasa.org",
+      "name": "Michelle Rodriguez",
+      "title": "Payments Engineer",
+      "domains": [
+        "payments.card-networks",
+        "payments.processing"
+      ]
+    },
+    {
+      "email": "brian.thompson@pantalasa.org",
+      "name": "Brian Thompson",
+      "title": "Settlement Specialist",
+      "domains": [
+        "payments.settlement",
+        "payments.card-networks"
+      ]
+    },
+    {
+      "email": "nicole.anderson@pantalasa.org",
+      "name": "Nicole Anderson",
+      "title": "Growth Engineer",
+      "domains": [
+        "growth.lifecycle",
+        "growth.experimentation"
+      ]
+    },
+    {
+      "email": "jason.white@pantalasa.org",
+      "name": "Jason White",
+      "title": "Acquisition Specialist",
+      "domains": [
+        "growth.acquisition",
+        "growth.lifecycle"
+      ]
+    },
+    {
+      "email": "emily.martinez@pantalasa.org",
+      "name": "Emily Martinez",
+      "title": "ML Engineer",
+      "domains": [
+        "ml.feature-store",
+        "ml.model-serving"
+      ]
+    },
+    {
+      "email": "ryan.clark@pantalasa.org",
+      "name": "Ryan Clark",
+      "title": "Senior ML Engineer",
+      "domains": [
+        "ml.recommendations",
+        "data.pipelines"
+      ]
+    },
+    {
+      "email": "jessica.lewis@pantalasa.org",
+      "name": "Jessica Lewis",
+      "title": "iOS Developer",
+      "domains": [
+        "mobile.ios-sdk",
+        "mobile.react-native"
+      ]
+    },
+    {
+      "email": "andrew.hall@pantalasa.org",
+      "name": "Andrew Hall",
+      "title": "Android Developer",
+      "domains": [
+        "mobile.android-sdk",
+        "mobile.react-native"
+      ]
+    },
+    {
+      "email": "samantha.young@pantalasa.org",
+      "name": "Samantha Young",
+      "title": "DevOps Engineer",
+      "domains": [
+        "tooling.ci-cd",
+        "tooling.observability"
+      ]
+    },
+    {
+      "email": "matthew.allen@pantalasa.org",
+      "name": "Matthew Allen",
+      "title": "Platform Tools Engineer",
+      "domains": [
+        "tooling.dev-environments",
+        "tooling.observability"
+      ]
+    },
+    {
+      "email": "victoria.scott@pantalasa.org",
+      "name": "Victoria Scott",
+      "title": "Staff Platform Engineer",
+      "domains": [
+        "platform.auth",
+        "security.identity"
+      ]
+    },
+    {
+      "email": "joshua.king@pantalasa.org",
+      "name": "Joshua King",
+      "title": "Product Designer",
+      "domains": [
+        "product.merchant-dashboard",
+        "product.onboarding"
+      ]
+    },
+    {
+      "email": "katherine.adams@pantalasa.org",
+      "name": "Katherine Adams",
+      "title": "Data Scientist",
+      "domains": [
+        "data.analytics",
+        "ml.recommendations"
+      ]
+    },
+    {
+      "email": "timothy.nelson@pantalasa.org",
+      "name": "Timothy Nelson",
+      "title": "Infrastructure Engineer",
+      "domains": [
+        "infra.sre",
+        "tooling.observability"
+      ]
+    },
+    {
+      "email": "laura.mitchell@pantalasa.org",
+      "name": "Laura Mitchell",
+      "title": "Compliance Manager",
+      "domains": [
+        "security.compliance",
+        "payments.settlement"
+      ]
+    },
+    {
+      "email": "steven.carter@pantalasa.org",
+      "name": "Steven Carter",
+      "title": "Senior Payments Engineer",
+      "domains": [
+        "payments.processing",
+        "payments.card-networks"
+      ]
+    },
+    {
+      "email": "megan.roberts@pantalasa.org",
+      "name": "Megan Roberts",
+      "title": "Growth Product Manager",
+      "domains": [
+        "growth.experimentation",
+        "product.onboarding"
+      ]
+    },
+    {
+      "email": "justin.phillips@pantalasa.org",
+      "name": "Justin Phillips",
+      "title": "Mobile Platform Lead",
+      "domains": [
+        "mobile.react-native",
+        "platform.api-gateway"
+      ]
+    },
+    {
+      "email": "ashley.campbell@pantalasa.org",
+      "name": "Ashley Campbell",
+      "title": "Developer Advocate",
+      "domains": [
+        "product.developer-portal",
+        "tooling.dev-environments"
+      ]
+    },
+    {
+      "email": "brandon.parker@pantalasa.org",
+      "name": "Brandon Parker",
+      "title": "Network Engineer",
+      "domains": [
+        "infra.networking",
+        "infra.cloud-ops"
+      ]
+    },
+    {
+      "email": "heather.evans@pantalasa.org",
+      "name": "Heather Evans",
+      "title": "Identity Engineer",
+      "domains": [
+        "security.identity",
+        "platform.auth"
+      ]
+    },
+    {
+      "email": "derek.turner@pantalasa.org",
+      "name": "Derek Turner",
+      "title": "Senior SRE",
+      "domains": [
+        "infra.sre",
+        "infra.kubernetes"
+      ]
+    },
+    {
+      "email": "christina.morgan@pantalasa.org",
+      "name": "Christina Morgan",
+      "title": "ML Platform Engineer",
+      "domains": [
+        "ml.model-serving",
+        "tooling.ci-cd"
+      ]
+    },
+    {
+      "email": "patrick.bailey@pantalasa.org",
+      "name": "Patrick Bailey",
+      "title": "Backend Engineer",
+      "domains": [
+        "product.checkout",
+        "payments.processing"
+      ]
+    },
+    {
+      "email": "allison.rivera@pantalasa.org",
+      "name": "Allison Rivera",
+      "title": "Fraud Detection Engineer",
+      "domains": [
+        "security.fraud-detection",
+        "ml.feature-store"
+      ]
+    }
+  ],
+  "commit_authors": [
+    {
+      "name": "Carlos Mendez",
+      "email": "carlos.mendez@pantalasa.org"
+    },
+    {
+      "name": "Lisa Nguyen",
+      "email": "lisa.nguyen@pantalasa.org"
+    },
+    {
+      "name": "Ahmed Hassan",
+      "email": "ahmed.hassan@pantalasa.org"
+    },
+    {
+      "name": "Rachel Kim",
+      "email": "rachel.kim@pantalasa.org"
+    },
+    {
+      "name": "Amanda Lee",
+      "email": "amanda.lee@pantalasa.org"
+    },
+    {
+      "name": "Christopher Davis",
+      "email": "christopher.davis@pantalasa.org"
+    },
+    {
+      "name": "Emily Martinez",
+      "email": "emily.martinez@pantalasa.org"
+    },
+    {
+      "name": "Ryan Clark",
+      "email": "ryan.clark@pantalasa.org"
+    },
+    {
+      "name": "Samantha Young",
+      "email": "samantha.young@pantalasa.org"
+    },
+    {
+      "name": "Matthew Allen",
+      "email": "matthew.allen@pantalasa.org"
+    },
+    {
+      "name": "Victoria Scott",
+      "email": "victoria.scott@pantalasa.org"
+    },
+    {
+      "name": "Derek Turner",
+      "email": "derek.turner@pantalasa.org"
+    },
+    {
+      "name": "Christina Morgan",
+      "email": "christina.morgan@pantalasa.org"
+    }
+  ]
+}
