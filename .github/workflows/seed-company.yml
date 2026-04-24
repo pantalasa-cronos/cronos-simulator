@@ -23,6 +23,8 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT_CRONOS_SIMULATOR }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -36,20 +38,34 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
         run: bash scripts/gen-company.sh
 
-      - name: Create PR with seed/company.json
+      - name: Commit and open PR
         if: ${{ !inputs.dry_run }}
-        uses: peter-evans/create-pull-request@v7
-        with:
-          token: ${{ secrets.GH_PAT_CRONOS_SIMULATOR }}
-          commit-message: "Regenerate seed/company.json"
-          title: "Regenerate seed/company.json"
-          body: |
-            Regenerated via `Seed company` workflow.
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_CRONOS_SIMULATOR }}
+        run: |
+          set -euo pipefail
 
-            Model: `${{ inputs.model }}`
+          git config --global user.name  "cronos-simulator"
+          git config --global user.email "simulator@pantalasa.org"
 
-            Review the domain list, subdomains, people, and commit authors before merging.
-          branch: "seed/company"
-          delete-branch: true
-          add-paths: |
-            seed/company.json
+          if [ -z "$(git status --porcelain seed/company.json)" ]; then
+            echo "No changes to seed/company.json; nothing to do."
+            exit 0
+          fi
+
+          BRANCH="seed/company-${{ github.run_id }}"
+          git checkout -b "$BRANCH"
+          git add seed/company.json
+          git commit -m "Regenerate seed/company.json (model: ${{ inputs.model }})"
+          git push -u origin "$BRANCH"
+
+          gh pr create \
+            --repo "${{ github.repository }}" \
+            --base main \
+            --head "$BRANCH" \
+            --title "Regenerate seed/company.json" \
+            --body "Regenerated via the **Seed company** workflow.
+
+          Model: \`${{ inputs.model }}\`
+
+          Review the domain list, subdomains, people, and commit authors before merging."
