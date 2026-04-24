@@ -157,12 +157,19 @@ def _run(cmd: list[str], cwd: Path | None = None, check: bool = True) -> subproc
 
 def push_commit(entry: LedgerEntry, rng: random.Random) -> bool:
     """Clone, append a line to CHANGELOG.md, commit, push. Returns True on success."""
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GH_PAT") or ""
+    if not token:
+        log("GH_TOKEN not set; cannot clone/push")
+        return False
+    url = f"https://x-access-token:{token}@github.com/{ORG}/{entry.name}.git"
+
     with tempfile.TemporaryDirectory(prefix="sim-act-") as tmp:
         workdir = Path(tmp) / entry.name
         try:
-            _run(["gh", "repo", "clone", f"{ORG}/{entry.name}", str(workdir), "--", "--depth=1"])
+            _run(["git", "clone", "--depth=1", url, str(workdir)])
         except Exception as e:
-            log(f"clone {entry.name} failed: {e}")
+            msg = str(e).replace(token, "***")
+            log(f"clone {entry.name} failed: {msg}")
             return False
 
         changelog = workdir / "CHANGELOG.md"

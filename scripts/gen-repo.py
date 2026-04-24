@@ -364,7 +364,6 @@ def _run(cmd: list[str], cwd: Path | None = None, env: dict[str, str] | None = N
 
 
 def create_repo_and_push(name: str, description: str, workdir: Path, private: bool = True) -> None:
-    visibility = "--private" if private else "--public"
     # Git init + initial commit.
     for cmd in (
         ["git", "init", "-b", "main"],
@@ -377,20 +376,39 @@ def create_repo_and_push(name: str, description: str, workdir: Path, private: bo
         if r.returncode != 0:
             raise RuntimeError(f"{' '.join(cmd)} failed: {r.stderr.strip()}")
 
+    # Create the empty repo via direct API call. `gh repo create` does a
+    # precheck against /users/<owner> first which returns 401 with our
+    # fine-grained PAT, whereas the repo-creation POST itself works.
     r = _run(
-        ["gh", "repo", "create", f"{ORG}/{name}", visibility,
-         "--description", description[:350],
-         "--source=.", "--push", "--remote=origin"],
-        cwd=workdir,
+        ["gh", "api", "-X", "POST", f"/orgs/{ORG}/repos",
+         "-f", f"name={name}",
+         "-F", f"private={'true' if private else 'false'}",
+         "-f", f"description={description[:350]}"],
     )
     if r.returncode != 0:
-        raise RuntimeError(f"gh repo create failed: {r.stderr.strip()}")
+        raise RuntimeError(f"POST /orgs/{ORG}/repos failed: {r.stderr.strip() or r.stdout.strip()}")
+
+    # Push initial commit via HTTPS URL embedding the PAT.
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GH_PAT") or ""
+    if not token:
+        raise RuntimeError("GH_TOKEN is not set; cannot push initial commit")
+    remote_url = f"https://x-access-token:{token}@github.com/{ORG}/{name}.git"
+    for cmd in (
+        ["git", "remote", "add", "origin", remote_url],
+        ["git", "push", "-u", "origin", "main"],
+    ):
+        r = _run(cmd, cwd=workdir)
+        if r.returncode != 0:
+            # Redact token from any error we surface so it doesn't hit the log.
+            err = (r.stderr or r.stdout).strip().replace(token, "***")
+            raise RuntimeError(f"{cmd[0]} {cmd[1]} failed: {err}")
 
 
 def archive_repo(name: str) -> None:
-    r = _run(["gh", "repo", "archive", f"{ORG}/{name}", "--yes"])
+    r = _run(["gh", "api", "-X", "PATCH", f"/repos/{ORG}/{name}",
+              "-F", "archived=true"])
     if r.returncode != 0:
-        log(f"WARN: failed to archive {name}: {r.stderr.strip()}")
+        log(f"WARN: failed to archive {name}: {(r.stderr or r.stdout).strip()}")
 
 
 def existing_repo_names(ledger: list[dict[str, Any]]) -> set[str]:
