@@ -91,7 +91,11 @@ set -e
 echo "claude exited: $CLAUDE_EXIT" >&2
 echo "-- stderr (last 50 lines) --" >&2
 tail -50 "$RAW_ERR" >&2 || true
-echo "-- stdout size: $(wc -c < "$RAW_OUT") bytes --" >&2
+echo "-- stdout ($(wc -c < "$RAW_OUT") bytes) --" >&2
+cat "$RAW_OUT" >&2 || true
+echo >&2
+echo "-- env check --" >&2
+echo "ANTHROPIC_API_KEY set: ${ANTHROPIC_API_KEY:+yes}${ANTHROPIC_API_KEY:-no} (length: ${#ANTHROPIC_API_KEY})" >&2
 
 if [ $CLAUDE_EXIT -ne 0 ]; then
     echo "claude CLI failed; aborting" >&2
