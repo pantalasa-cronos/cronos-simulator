@@ -36,10 +36,9 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
         run: bash scripts/gen-company.sh
 
-      - name: Commit and open PR
+      - name: Commit seed/company.json to main
         if: ${{ !inputs.dry_run }}
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT_CRONOS_SIMULATOR }}
           PAT: ${{ secrets.GH_PAT_CRONOS_SIMULATOR }}
         run: |
           set -euo pipefail
@@ -52,24 +51,13 @@ jobs:
             exit 0
           fi
 
-          # Swap origin to use our PAT. The default origin was set up by
-          # actions/checkout with the ephemeral GITHUB_TOKEN (read-only for
-          # our purposes), which can't push a new branch.
+          # The default origin was set up by actions/checkout with the
+          # ephemeral GITHUB_TOKEN, which cannot push. Swap in our PAT.
           git remote set-url origin "https://x-access-token:${PAT}@github.com/${{ github.repository }}.git"
 
-          BRANCH="seed/company-${{ github.run_id }}"
-          git checkout -b "$BRANCH"
           git add seed/company.json
-          git commit -m "Regenerate seed/company.json (model: ${{ inputs.model }})"
-          git push -u origin "$BRANCH"
+          git commit -m "Regenerate seed/company.json (model: ${{ inputs.model }}, run ${{ github.run_id }})"
+          git push origin HEAD:main
 
-          gh pr create \
-            --repo "${{ github.repository }}" \
-            --base main \
-            --head "$BRANCH" \
-            --title "Regenerate seed/company.json" \
-            --body "Regenerated via the **Seed company** workflow.
-
-          Model: \`${{ inputs.model }}\`
-
-          Review the domain list, subdomains, people, and commit authors before merging."
+          echo "Committed directly to main. Review the generated file at:"
+          echo "  https://github.com/${{ github.repository }}/blob/main/seed/company.json"
