@@ -1,0 +1,102 @@
+# Archetype weights for AI-generated repos.
+#
+# Each dimension is sampled independently by scripts/gen-repo.py:
+#   language x role x lifecycle -> one archetype per new repo.
+#
+# Weights are relative (not percentages); the script normalises them.
+# Tune these to shift the shape of the generated portfolio without
+# touching any Python code.
+
+languages:
+  # Backend-heavy shops: go, python, and node dominate, with a long tail.
+  go: 18
+  python: 18
+  node: 20
+  java: 10
+  rust: 4
+  ruby: 5
+  php: 3
+  cpp: 2
+  shell: 5
+  yaml-only: 10   # k8s manifests, helm charts, terraform-only repos
+  docs-only: 5
+
+roles:
+  api-service: 30
+  library: 25
+  cli-tool: 8
+  worker: 10          # background/consumer services
+  frontend-app: 12
+  data-pipeline: 5
+  infra-as-code: 5
+  docs: 3
+  sandbox: 2          # experimental / throwaway
+
+lifecycles:
+  production: 45
+  maintenance: 30
+  experimental: 15
+  archived: 10        # real `gh repo archive` after creation
+
+# activity_tier is assigned once at repo-creation time.
+# scripts/simulate-activity.py uses tier to pick which repos commit each run.
+activity_tiers:
+  hot: 0.05           # eligible every hour
+  active: 0.25        # eligible every ~6h
+  maintenance: 0.40   # eligible every ~3 days
+  dormant: 0.30       # never commits
+
+# Per-tier weighting used by the activity simulator when sampling a batch of
+# commits. Higher numbers pull more of each run toward that tier.
+activity_weights:
+  hot: 60
+  active: 30
+  maintenance: 10
+  dormant: 0
+
+# Common suffixes appended by the name generator as a fallback when the AI
+# does not propose a name. The final name is <team-prefix>-<noun>-<suffix>.
+name_suffixes:
+  api-service: [api, service, svc, server]
+  library: [lib, sdk, core, utils, client]
+  cli-tool: [cli, tool, cmd]
+  worker: [worker, consumer, processor, ingester]
+  frontend-app: [web, app, ui, dashboard]
+  data-pipeline: [pipeline, etl, sync]
+  infra-as-code: [infra, iac, terraform, helm]
+  docs: [docs, handbook, wiki]
+  sandbox: [sandbox, playground, spike]
+
+# Seed nouns the script can splice with a team prefix when falling back to
+# a non-AI name. Claude may override entirely based on prior-repos context.
+name_nouns:
+  - ledger
+  - checkout
+  - metrics
+  - inventory
+  - catalog
+  - auth
+  - identity
+  - gateway
+  - router
+  - proxy
+  - scheduler
+  - notifier
+  - mailer
+  - billing
+  - fraud
+  - search
+  - index
+  - stream
+  - queue
+  - storage
+  - cache
+  - config
+  - feature-flags
+  - insights
+  - reports
+  - audit
+  - compliance
+  - risk
+  - fx
+  - treasury

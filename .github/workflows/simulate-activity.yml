@@ -1,0 +1,71 @@
+name: Simulate activity
+
+# Pushes Pareto-weighted [skip ci] commits across the simulated repo fleet.
+# See README.md for the full set of vars & secrets.
+
+on:
+  schedule:
+    - cron: "0 * * * *"   # hourly
+  workflow_dispatch:
+    inputs:
+      commits:
+        description: "Max commits to push in this run"
+        default: "50"
+      dry_run:
+        description: "Log targets but do not push"
+        type: boolean
+        default: false
+      force:
+        description: "Run even if ACTIVITY_ENABLED=false"
+        type: boolean
+        default: false
+
+concurrency:
+  group: cronos-simulator-activity
+  cancel-in-progress: false
+
+jobs:
+  activity:
+    if: ${{ vars.ACTIVITY_ENABLED == 'true' || inputs.force == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GH_PAT_CRONOS_SIMULATOR }}
+      SIMULATOR_ORG: ${{ vars.SIMULATOR_ORG || 'pantalasa-cronos' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT_CRONOS_SIMULATOR }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Configure git
+        run: |
+          git config --global user.name  "cronos-simulator"
+          git config --global user.email "simulator@pantalasa.org"
+
+      - name: Push synthetic commits
+        run: |
+          set -euo pipefail
+          ARGS=(--commits "${{ inputs.commits || vars.COMMITS_PER_RUN || '50' }}")
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            ARGS+=(--dry-run)
+          fi
+          python scripts/simulate-activity.py "${ARGS[@]}"
+
+      - name: Commit ledger updates
+        run: |
+          set -euo pipefail
+          if [ -n "$(git status --porcelain state/repos.jsonl)" ]; then
+            git add state/repos.jsonl
+            git commit -m "chore(state): update last_commit_at (run ${{ github.run_id }})"
+            git push
+          else
+            echo "No ledger changes to commit"
+          fi

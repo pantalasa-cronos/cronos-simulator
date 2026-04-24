@@ -1,0 +1,88 @@
+name: Generate repos
+
+# Creates AI-authored repos in the pantalasa-cronos org and records them in
+# state/repos.jsonl. See README.md for the full set of vars & secrets.
+
+on:
+  schedule:
+    # 4x/day when ENABLED=true. Change this line to tune cadence:
+    #   0 */6 * * *   - 4x/day (default)
+    #   0 */3 * * *   - 8x/day (accelerate ramp)
+    #   0 */12 * * *  - 2x/day (slow down)
+    #   0 2 * * *     - 1x/day (maintenance mode post-1000)
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      count:
+        description: "How many repos to generate in this run"
+        default: "38"
+      force:
+        description: "Run even if ENABLED=false (and ignore TARGET_REPOS)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: cronos-simulator-generate
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    if: ${{ vars.ENABLED == 'true' || inputs.force == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GH_PAT_CRONOS_SIMULATOR }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY_CRONOS_SIMULATOR }}
+      SIMULATOR_ORG: ${{ vars.SIMULATOR_ORG || 'pantalasa-cronos' }}
+      TARGET_REPOS: ${{ vars.TARGET_REPOS || '1000' }}
+      SLEEP_MIN_SECONDS: ${{ vars.SLEEP_MIN_SECONDS || '30' }}
+      SLEEP_MAX_SECONDS: ${{ vars.SLEEP_MAX_SECONDS || '60' }}
+      CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL || 'sonnet' }}
+      CLAUDE_MAX_BUDGET_USD: ${{ vars.CLAUDE_MAX_BUDGET_USD || '0.50' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT_CRONOS_SIMULATOR }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install pyyaml
+          npm install -g @anthropic-ai/claude-code
+          gh --version
+          claude --version
+
+      - name: Configure git
+        run: |
+          git config --global user.name  "cronos-simulator"
+          git config --global user.email "simulator@pantalasa.org"
+
+      - name: Generate repos
+        run: |
+          set -euo pipefail
+          COUNT="${{ inputs.count || vars.REPOS_PER_RUN || '38' }}"
+          ARGS=(--count "$COUNT")
+          if [ "${{ inputs.force }}" = "true" ]; then
+            ARGS+=(--force)
+          fi
+          python scripts/gen-repo.py "${ARGS[@]}"
+
+      - name: Commit ledger updates
+        run: |
+          set -euo pipefail
+          if [ -n "$(git status --porcelain state/repos.jsonl)" ]; then
+            git add state/repos.jsonl
+            git commit -m "chore(state): update repos.jsonl (run ${{ github.run_id }})"
+            git push
+          else
+            echo "No ledger changes to commit"
+          fi
