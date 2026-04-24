@@ -91,7 +91,7 @@ PROMPT_EOF
 
 echo "Calling Anthropic API (model=$MODEL, max_tokens=$MAX_TOKENS) ..." >&2
 
-REQ_BODY=$(python3 -c '
+REQ_BODY=$(MODEL="$MODEL" MAX_TOKENS="$MAX_TOKENS" python3 -c '
 import json, sys, os
 prompt = sys.stdin.read()
 body = {
@@ -100,7 +100,7 @@ body = {
     "messages": [{"role": "user", "content": prompt}],
 }
 print(json.dumps(body))
-' MODEL="$MODEL" MAX_TOKENS="$MAX_TOKENS" <<<"$PROMPT")
+' <<<"$PROMPT")
 
 RESP=$(curl -sS -w '\n__HTTP_STATUS__%{http_code}' \
     https://api.anthropic.com/v1/messages \
