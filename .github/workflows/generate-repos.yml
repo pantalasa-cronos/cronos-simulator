@@ -69,6 +69,21 @@ jobs:
           git config --global user.name  "cronos-simulator"
           git config --global user.email "simulator@pantalasa.org"
 
+      - name: Diagnose PAT
+        run: |
+          set -uo pipefail
+          TOKEN_LEN="$(printf '%s' "$GH_TOKEN" | wc -c)"
+          TOKEN_SHA="$(printf '%s' "$GH_TOKEN" | sha256sum | awk '{print $1}')"
+          echo "GH_TOKEN byte length: $TOKEN_LEN"
+          echo "GH_TOKEN sha256:      $TOKEN_SHA"
+          # Direct API call bypassing gh; print status only.
+          STATUS=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "User-Agent: cronos-simulator" \
+            https://api.github.com/user)
+          echo "GET /user status: $STATUS"
+
       - name: Generate repos
         run: |
           set -euo pipefail
