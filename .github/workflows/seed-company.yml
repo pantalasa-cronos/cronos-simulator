@@ -23,8 +23,6 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GH_PAT_CRONOS_SIMULATOR }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -42,6 +40,7 @@ jobs:
         if: ${{ !inputs.dry_run }}
         env:
           GH_TOKEN: ${{ secrets.GH_PAT_CRONOS_SIMULATOR }}
+          PAT: ${{ secrets.GH_PAT_CRONOS_SIMULATOR }}
         run: |
           set -euo pipefail
 
@@ -52,6 +51,11 @@ jobs:
             echo "No changes to seed/company.json; nothing to do."
             exit 0
           fi
+
+          # Swap origin to use our PAT. The default origin was set up by
+          # actions/checkout with the ephemeral GITHUB_TOKEN (read-only for
+          # our purposes), which can't push a new branch.
+          git remote set-url origin "https://x-access-token:${PAT}@github.com/${{ github.repository }}.git"
 
           BRANCH="seed/company-${{ github.run_id }}"
           git checkout -b "$BRANCH"
