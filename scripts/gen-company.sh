@@ -102,15 +102,16 @@ body = {
 print(json.dumps(body))
 ' <<<"$PROMPT")
 
-RESP=$(curl -sS -w '\n__HTTP_STATUS__%{http_code}' \
+BODY_FILE="$(mktemp)"
+trap 'rm -f "$BODY_FILE"' EXIT
+
+STATUS=$(curl -sS -o "$BODY_FILE" -w '%{http_code}' \
     https://api.anthropic.com/v1/messages \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
     -H "anthropic-version: 2023-06-01" \
     -H "content-type: application/json" \
     --data-binary "$REQ_BODY")
-
-STATUS=$(printf '%s' "$RESP" | sed -n 's/.*__HTTP_STATUS__\([0-9]*\)$/\1/p')
-BODY=$(printf '%s' "$RESP" | sed 's/\n__HTTP_STATUS__[0-9]*$//')
+BODY=$(cat "$BODY_FILE")
 
 echo "HTTP $STATUS" >&2
 
