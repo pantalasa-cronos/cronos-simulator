@@ -70,12 +70,35 @@ PROMPT_EOF
 )
 
 echo "Invoking claude (model=$MODEL) ..." >&2
-OUTPUT=$(claude \
+which claude >&2 || true
+claude --version >&2 || true
+
+RAW_OUT="$(mktemp)"
+RAW_ERR="$(mktemp)"
+trap 'rm -f "$RAW_OUT" "$RAW_ERR"' EXIT
+
+set +e
+claude \
   -p "$PROMPT" \
   --model "$MODEL" \
   --output-format text \
   --dangerously-skip-permissions \
-  --max-budget-usd "$BUDGET" 2>/dev/null)
+  --max-budget-usd "$BUDGET" \
+  >"$RAW_OUT" 2>"$RAW_ERR"
+CLAUDE_EXIT=$?
+set -e
+
+echo "claude exited: $CLAUDE_EXIT" >&2
+echo "-- stderr (last 50 lines) --" >&2
+tail -50 "$RAW_ERR" >&2 || true
+echo "-- stdout size: $(wc -c < "$RAW_OUT") bytes --" >&2
+
+if [ $CLAUDE_EXIT -ne 0 ]; then
+    echo "claude CLI failed; aborting" >&2
+    exit 1
+fi
+
+OUTPUT=$(cat "$RAW_OUT")
 
 # Trim to the first balanced JSON object.
 JSON=$(echo "$OUTPUT" | python3 -c '
