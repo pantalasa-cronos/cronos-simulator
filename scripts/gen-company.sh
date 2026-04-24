@@ -8,17 +8,37 @@
 # repo-generation run sees the same corporate shape.
 #
 # Usage:
-#   CLAUDE_MODEL=opus ./scripts/gen-company.sh          # write to seed/company.json
-#   DRY_RUN=1        ./scripts/gen-company.sh           # print to stdout only
+#   CLAUDE_MODEL=claude-opus-4-5 ./scripts/gen-company.sh   # write to seed/company.json
+#   DRY_RUN=1                    ./scripts/gen-company.sh   # print to stdout only
 #
 # Required env:
-#   ANTHROPIC_API_KEY   (Claude Code reads this)
+#   ANTHROPIC_API_KEY   (used as x-api-key for direct Anthropic API calls)
+#
+# We call the Anthropic API directly via curl rather than going through the
+# Claude Code CLI. Claude Code has its own OAuth layer that does not read
+# ANTHROPIC_API_KEY the same way and was returning "Invalid API key" in CI.
+# The direct REST API only needs the env var and is plenty for a JSON-output
+# one-shot prompt.
 set -euo pipefail
+
+if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+    echo "ANTHROPIC_API_KEY is not set" >&2
+    exit 1
+fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${REPO_ROOT}/seed/company.json"
-MODEL="${CLAUDE_MODEL:-opus}"
-BUDGET="${CLAUDE_MAX_BUDGET_USD:-1.00}"
+
+# CLAUDE_MODEL may be an alias ("opus", "sonnet") for the Claude Code CLI or
+# a full model id for the REST API. Default to a full id here.
+MODEL="${CLAUDE_MODEL:-claude-opus-4-5}"
+case "$MODEL" in
+    opus)   MODEL="claude-opus-4-5" ;;
+    sonnet) MODEL="claude-sonnet-4-5" ;;
+    haiku)  MODEL="claude-haiku-4-5" ;;
+esac
+
+MAX_TOKENS="${MAX_TOKENS:-16000}"
 
 mkdir -p "$(dirname "$OUT")"
 
@@ -69,55 +89,50 @@ Constraints:
 PROMPT_EOF
 )
 
-echo "Invoking claude (model=$MODEL) ..." >&2
-which claude >&2 || true
-claude --version >&2 || true
+echo "Calling Anthropic API (model=$MODEL, max_tokens=$MAX_TOKENS) ..." >&2
 
-RAW_OUT="$(mktemp)"
-RAW_ERR="$(mktemp)"
-trap 'rm -f "$RAW_OUT" "$RAW_ERR"' EXIT
+REQ_BODY=$(python3 -c '
+import json, sys, os
+prompt = sys.stdin.read()
+body = {
+    "model": os.environ["MODEL"],
+    "max_tokens": int(os.environ["MAX_TOKENS"]),
+    "messages": [{"role": "user", "content": prompt}],
+}
+print(json.dumps(body))
+' MODEL="$MODEL" MAX_TOKENS="$MAX_TOKENS" <<<"$PROMPT")
 
-set +e
-claude \
-  -p "$PROMPT" \
-  --model "$MODEL" \
-  --output-format text \
-  --dangerously-skip-permissions \
-  --max-budget-usd "$BUDGET" \
-  >"$RAW_OUT" 2>"$RAW_ERR"
-CLAUDE_EXIT=$?
-set -e
+RESP=$(curl -sS -w '\n__HTTP_STATUS__%{http_code}' \
+    https://api.anthropic.com/v1/messages \
+    -H "x-api-key: $ANTHROPIC_API_KEY" \
+    -H "anthropic-version: 2023-06-01" \
+    -H "content-type: application/json" \
+    --data-binary "$REQ_BODY")
 
-echo "claude exited: $CLAUDE_EXIT" >&2
-echo "-- stderr (last 50 lines) --" >&2
-tail -50 "$RAW_ERR" >&2 || true
-echo "-- stdout ($(wc -c < "$RAW_OUT") bytes) --" >&2
-cat "$RAW_OUT" >&2 || true
-echo >&2
-echo "-- env check --" >&2
-echo "ANTHROPIC_API_KEY set: ${ANTHROPIC_API_KEY:+yes}${ANTHROPIC_API_KEY:-no} (length: ${#ANTHROPIC_API_KEY})" >&2
+STATUS=$(printf '%s' "$RESP" | sed -n 's/.*__HTTP_STATUS__\([0-9]*\)$/\1/p')
+BODY=$(printf '%s' "$RESP" | sed 's/\n__HTTP_STATUS__[0-9]*$//')
 
-if [ $CLAUDE_EXIT -ne 0 ]; then
-    echo "claude CLI failed; aborting" >&2
+echo "HTTP $STATUS" >&2
+
+if [ "$STATUS" != "200" ]; then
+    echo "Anthropic API error:" >&2
+    echo "$BODY" >&2
     exit 1
 fi
 
-OUTPUT=$(cat "$RAW_OUT")
-
-# Trim to the first balanced JSON object.
-JSON=$(echo "$OUTPUT" | python3 -c '
-import json, sys, re
-raw = sys.stdin.read().strip()
-# Strip any markdown fences that sneak in.
-raw = re.sub(r"^```[a-zA-Z]*\n?", "", raw)
-raw = re.sub(r"\n?```$", "", raw)
-start = raw.find("{")
+JSON=$(echo "$BODY" | python3 -c '
+import json, re, sys
+resp = json.load(sys.stdin)
+text = "".join(b["text"] for b in resp["content"] if b.get("type") == "text")
+text = text.strip()
+text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
+text = re.sub(r"\n?```$", "", text)
+start = text.find("{")
 if start == -1:
-    sys.stderr.write("No JSON object found in claude output\n")
+    sys.stderr.write("No JSON object in response text\n")
     sys.exit(1)
-depth = 0
-end = None
-for i, ch in enumerate(raw[start:], start=start):
+depth, end = 0, None
+for i, ch in enumerate(text[start:], start=start):
     if ch == "{":
         depth += 1
     elif ch == "}":
@@ -126,9 +141,9 @@ for i, ch in enumerate(raw[start:], start=start):
             end = i + 1
             break
 if end is None:
-    sys.stderr.write("Unbalanced JSON in claude output\n")
+    sys.stderr.write("Unbalanced JSON in response text\n")
     sys.exit(1)
-obj = json.loads(raw[start:end])
+obj = json.loads(text[start:end])
 print(json.dumps(obj, indent=2))
 ')
 
@@ -141,7 +156,7 @@ echo "$JSON" > "$OUT"
 echo "Wrote $OUT" >&2
 
 python3 -c "
-import json, sys
+import json
 with open('$OUT') as f: d = json.load(f)
 print('domains:', len(d.get('domains', {})))
 print('subdomains:', sum(len(v.get('children', [])) for v in d.get('domains', {}).values()))

@@ -24,11 +24,13 @@ import argparse
 import json
 import os
 import random
-import shutil
+import re
 import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any
@@ -54,8 +56,9 @@ ORG = os.environ.get("SIMULATOR_ORG", "pantalasa-cronos")
 TARGET_REPOS = int(os.environ.get("TARGET_REPOS", "1000"))
 SLEEP_MIN = float(os.environ.get("SLEEP_MIN_SECONDS", "30"))
 SLEEP_MAX = float(os.environ.get("SLEEP_MAX_SECONDS", "60"))
-CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
-CLAUDE_MAX_BUDGET = os.environ.get("CLAUDE_MAX_BUDGET_USD", "0.50")  # per-repo soft cap
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "sonnet")
+CLAUDE_MAX_TOKENS = int(os.environ.get("CLAUDE_MAX_TOKENS", "16000"))
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
 
 @dataclass
@@ -186,9 +189,17 @@ def fallback_name(arch: Archetype, domain: str, archetypes_cfg: dict[str, Any],
 def build_claude_prompt(arch: Archetype, domain: str, owner: str, suggested_name: str,
                         prior: list[dict[str, Any]]) -> str:
     prior_json = json.dumps(prior, indent=2) if prior else "[]"
-    return f"""You are generating a SINGLE small GitHub repository for a load-test of an SDLC
-guardrail platform. You are being run inside an EMPTY working directory and should
-create files directly in it (use your Write tool).
+    return f"""You are generating ONE small GitHub repository for a load test.
+Return a single JSON object with this exact shape and nothing else:
+
+{{
+  "name": "<kebab-case repo name, 3-60 chars, [a-z0-9-]>",
+  "description": "<one-line description>",
+  "files": {{
+    "<relative/path>": "<full file contents as a string>",
+    ...
+  }}
+}}
 
 Company context:
   organization: {ORG}
@@ -206,87 +217,139 @@ Suggested repo name: {suggested_name}
 Recent repositories in this company (use as naming + thematic context; do NOT duplicate):
 {prior_json}
 
-Requirements:
-  - Generate 5 to 15 realistic files that look like they belong in a small
-    real project matching the archetype. Prefer minimal but compilable/parseable
-    code over lorem ipsum.
-  - Always include:
-      README.md                (at least a Description, Installation, Usage section)
-      .gitignore               (language-appropriate)
-      CODEOWNERS               (single line: "* {owner}")
-      lunar.yml                (see below)
-      catalog-info.yaml        (Backstage-style, see below)
-      .github/workflows/ci.yml (one small job that runs a lint or test; use [skip ci]-friendly triggers)
-  - If role is "api-service" or "worker" and lifecycle is "production", also
-    include a minimal Dockerfile.
-  - If language is "docs-only", skip code and just write Markdown.
+Requirements for "files":
+  - 5 to 15 files total. Realistic, minimal, and matching the archetype.
+  - Always include these paths:
+      README.md                 (Description, Installation, Usage sections)
+      .gitignore                (language-appropriate)
+      CODEOWNERS                (single line: "* {owner}")
+      lunar.yml                 (see template below)
+      catalog-info.yaml         (see template below)
+      .github/workflows/ci.yml  (one small job, e.g. lint or test)
+  - If role is "api-service" or "worker" and lifecycle is "production",
+    also include a minimal Dockerfile.
+  - If language is "docs-only", skip code and use only Markdown.
   - If language is "yaml-only", generate k8s or helm yaml instead of code.
 
-File contents:
-  lunar.yml must be exactly:
-    components:
-      github.com/{ORG}/<REPO_NAME>:
-        tags: [{arch.language}, {arch.role}, {arch.lifecycle}]
+Template for lunar.yml (substitute the final repo name for <REPO_NAME>):
+components:
+  github.com/{ORG}/<REPO_NAME>:
+    tags: [{arch.language}, {arch.role}, {arch.lifecycle}]
 
-  catalog-info.yaml must be exactly:
-    apiVersion: backstage.io/v1alpha1
-    kind: Component
-    metadata:
-      name: <REPO_NAME>
-      annotations:
-        pantalasa.org/domain: {domain}
-    spec:
-      type: service
-      lifecycle: {arch.lifecycle}
-      owner: {owner}
+Template for catalog-info.yaml (substitute the final repo name for <REPO_NAME>):
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: <REPO_NAME>
+  annotations:
+    pantalasa.org/domain: {domain}
+spec:
+  type: service
+  lifecycle: {arch.lifecycle}
+  owner: {owner}
 
-Final step - emit ONLY a single JSON object as your very last message, on its own,
-with no surrounding prose or code fences. Shape:
-  {{"name": "<final-repo-name>", "description": "<one-line description>"}}
-The repo name must be kebab-case, 3-60 chars, lowercase letters/digits/hyphens only.
+Respond with ONLY the JSON object. No markdown fences, no prose.
 """
 
 
 def run_claude(prompt: str, workdir: Path) -> dict[str, Any]:
-    """Run Claude Code non-interactively in ``workdir`` and parse the final JSON.
+    """Call the Anthropic REST API and write the returned files into ``workdir``.
 
-    Returns a dict like ``{"name": "...", "description": "..."}``.
-    Raises RuntimeError on hard failures.
+    Returns a dict with ``name``, ``description``, and ``files`` (the parsed
+    JSON from the model). Raises RuntimeError on unrecoverable failures.
     """
-    cmd = [
-        "claude",
-        "-p", prompt,
-        "--model", CLAUDE_MODEL,
-        "--output-format", "text",
-        "--dangerously-skip-permissions",
-        "--max-budget-usd", CLAUDE_MAX_BUDGET,
-    ]
-    log(f"invoking claude in {workdir} (model={CLAUDE_MODEL})")
-    proc = subprocess.run(
-        cmd,
-        cwd=str(workdir),
-        capture_output=True,
-        text=True,
-        timeout=600,
-        check=False,
+    if not ANTHROPIC_API_KEY:
+        raise RuntimeError("ANTHROPIC_API_KEY is not set")
+
+    req = {
+        "model": _resolve_model(CLAUDE_MODEL),
+        "max_tokens": CLAUDE_MAX_TOKENS,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    log(f"invoking anthropic REST (model={req['model']}, max_tokens={req['max_tokens']})")
+
+    body = json.dumps(req).encode()
+    request = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=body,
+        headers={
+            "x-api-key": ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        method="POST",
     )
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"claude exited {proc.returncode}\nstderr:\n{proc.stderr[-2000:]}"
-        )
-    stdout = proc.stdout.strip()
-    # Find the last JSON object in stdout.
-    last_brace = stdout.rfind("{")
-    if last_brace == -1:
-        raise RuntimeError(f"claude output did not contain a JSON object:\n{stdout[-2000:]}")
-    tail = stdout[last_brace:]
     try:
-        obj = json.loads(tail)
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"failed to parse final JSON from claude: {e}\ntail={tail!r}")
+        with urllib.request.urlopen(request, timeout=600) as r:
+            resp_body = r.read().decode()
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="replace")
+        raise RuntimeError(f"anthropic API HTTP {e.code}: {detail[:2000]}")
+    except Exception as e:
+        raise RuntimeError(f"anthropic API call failed: {e}")
+
+    resp = json.loads(resp_body)
+    text = "".join(b["text"] for b in resp.get("content", []) if b.get("type") == "text").strip()
+    text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
+    text = re.sub(r"\n?```$", "", text)
+
+    obj = _parse_first_json_object(text)
     if "name" not in obj:
-        raise RuntimeError(f"claude response missing 'name': {obj}")
+        raise RuntimeError(f"response missing 'name': keys={list(obj.keys())}")
+    files = obj.get("files") or {}
+    if not isinstance(files, dict):
+        raise RuntimeError(f"response.files is not an object: got {type(files).__name__}")
+
+    name = obj["name"].strip().lower()
+    for path, content in files.items():
+        if not isinstance(content, str):
+            continue
+        content = content.replace("<REPO_NAME>", name)
+        full = (workdir / path).resolve()
+        if workdir.resolve() not in full.parents and full != workdir.resolve():
+            raise RuntimeError(f"file path escapes workdir: {path}")
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text(content)
     return obj
+
+
+def _parse_first_json_object(text: str) -> dict[str, Any]:
+    start = text.find("{")
+    if start == -1:
+        raise RuntimeError(f"no JSON object in response: {text[:500]!r}")
+    depth, end = 0, None
+    in_string = False
+    esc = False
+    for i, ch in enumerate(text[start:], start=start):
+        if in_string:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+    if end is None:
+        raise RuntimeError(f"unbalanced JSON in response: starts {text[start:start+300]!r}")
+    return json.loads(text[start:end])
+
+
+def _resolve_model(alias: str) -> str:
+    mapping = {
+        "opus": "claude-opus-4-5",
+        "sonnet": "claude-sonnet-4-5",
+        "haiku": "claude-haiku-4-5",
+    }
+    return mapping.get(alias, alias)
 
 
 def _run(cmd: list[str], cwd: Path | None = None, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:

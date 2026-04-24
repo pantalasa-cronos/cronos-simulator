@@ -29,12 +29,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Claude Code CLI
-        run: |
-          set -euo pipefail
-          npm install -g @anthropic-ai/claude-code
-          claude --version
-
       - name: Generate seed/company.json
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY_CRONOS_SIMULATOR }}

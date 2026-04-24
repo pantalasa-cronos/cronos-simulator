@@ -40,7 +40,7 @@ jobs:
       SLEEP_MIN_SECONDS: ${{ vars.SLEEP_MIN_SECONDS || '30' }}
       SLEEP_MAX_SECONDS: ${{ vars.SLEEP_MAX_SECONDS || '60' }}
       CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL || 'sonnet' }}
-      CLAUDE_MAX_BUDGET_USD: ${{ vars.CLAUDE_MAX_BUDGET_USD || '0.50' }}
+      CLAUDE_MAX_TOKENS: ${{ vars.CLAUDE_MAX_TOKENS || '16000' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,9 +57,7 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade pip
           pip install pyyaml
-          npm install -g @anthropic-ai/claude-code
           gh --version
-          claude --version
 
       - name: Configure git
         run: |
