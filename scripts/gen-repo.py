@@ -376,22 +376,18 @@ def create_repo_and_push(name: str, description: str, workdir: Path, private: bo
         if r.returncode != 0:
             raise RuntimeError(f"{' '.join(cmd)} failed: {r.stderr.strip()}")
 
-    # Create the empty repo via direct API call. `gh repo create` does a
-    # precheck against /users/<owner> first which returns 401 with our
-    # fine-grained PAT, whereas the repo-creation POST itself works.
-    r = _run(
-        ["gh", "api", "-X", "POST", f"/orgs/{ORG}/repos",
-         "-f", f"name={name}",
-         "-F", f"private={'true' if private else 'false'}",
-         "-f", f"description={description[:350]}"],
-    )
-    if r.returncode != 0:
-        raise RuntimeError(f"POST /orgs/{ORG}/repos failed: {r.stderr.strip() or r.stdout.strip()}")
-
-    # Push initial commit via HTTPS URL embedding the PAT.
+    # Create the empty repo via the REST API directly. We bypass `gh` because
+    # it does a precheck against /users/<owner> that 401s with fine-grained
+    # PATs. urllib with the raw token in the Authorization header works.
     token = os.environ.get("GH_TOKEN") or os.environ.get("GH_PAT") or ""
     if not token:
-        raise RuntimeError("GH_TOKEN is not set; cannot push initial commit")
+        raise RuntimeError("GH_TOKEN is not set")
+    _github_post(
+        f"/orgs/{ORG}/repos",
+        {"name": name, "private": private, "description": description[:350]},
+        token=token,
+    )
+
     remote_url = f"https://x-access-token:{token}@github.com/{ORG}/{name}.git"
     for cmd in (
         ["git", "remote", "add", "origin", remote_url],
@@ -405,10 +401,43 @@ def create_repo_and_push(name: str, description: str, workdir: Path, private: bo
 
 
 def archive_repo(name: str) -> None:
-    r = _run(["gh", "api", "-X", "PATCH", f"/repos/{ORG}/{name}",
-              "-F", "archived=true"])
-    if r.returncode != 0:
-        log(f"WARN: failed to archive {name}: {(r.stderr or r.stdout).strip()}")
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GH_PAT") or ""
+    if not token:
+        log(f"WARN: GH_TOKEN not set; cannot archive {name}")
+        return
+    try:
+        _github_request("PATCH", f"/repos/{ORG}/{name}", {"archived": True}, token=token)
+    except Exception as e:
+        log(f"WARN: failed to archive {name}: {e}")
+
+
+def _github_post(path: str, body: dict[str, Any], token: str) -> dict[str, Any]:
+    return _github_request("POST", path, body, token=token)
+
+
+def _github_request(method: str, path: str, body: dict[str, Any] | None,
+                    token: str) -> dict[str, Any]:
+    url = f"https://api.github.com{path}"
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method=method,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Content-Type": "application/json",
+            "User-Agent": "cronos-simulator",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            body_text = r.read().decode()
+            return json.loads(body_text) if body_text else {}
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="replace")
+        raise RuntimeError(f"GitHub {method} {path} HTTP {e.code}: {detail[:500]}")
 
 
 def existing_repo_names(ledger: list[dict[str, Any]]) -> set[str]:
@@ -536,6 +565,12 @@ def main() -> int:
     args = ap.parse_args()
 
     rng = random.Random(args.seed) if args.seed is not None else random.Random()
+
+    token = os.environ.get("GH_TOKEN", "")
+    if token:
+        log(f"GH_TOKEN present: length={len(token)} prefix={token[:8]!r} suffix={token[-4:]!r}")
+    else:
+        log("WARNING: GH_TOKEN is not set")
 
     archetypes_cfg = load_archetypes()
     company = load_company()
