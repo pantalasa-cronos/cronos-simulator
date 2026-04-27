@@ -5,12 +5,12 @@ name: Generate repos
 
 on:
   schedule:
-    # 4x/day when ENABLED=true. Change this line to tune cadence:
-    #   0 */6 * * *   - 4x/day (default)
+    # Tune cadence when ENABLED=true (see comment lines below):
+    #   0 */6 * * *   - 4x/day
     #   0 */3 * * *   - 8x/day (accelerate ramp)
     #   0 */12 * * *  - 2x/day (slow down)
     #   0 2 * * *     - 1x/day (maintenance mode post-1000)
-    - cron: "0 */6 * * *"
+    - cron: "0 */3 * * *"
   workflow_dispatch:
     inputs:
       count:
