@@ -5,13 +5,12 @@ name: Generate repos
 
 on:
   schedule:
-    # TEMP: every 15m to verify scheduled runs after flipping ENABLED (restore below).
-    # Tune cadence when ENABLED=true:
+    # Tune cadence when ENABLED=true (see comment lines below):
     #   0 */6 * * *   - 4x/day
     #   0 */3 * * *   - 8x/day (accelerate ramp)
     #   0 */12 * * *  - 2x/day (slow down)
     #   0 2 * * *     - 1x/day (maintenance mode post-1000)
-    - cron: "*/15 * * * *"
+    - cron: "0 */3 * * *"
   workflow_dispatch:
     inputs:
       count:
