@@ -101,7 +101,8 @@ jobs:
           if [ -n "$(git status --porcelain state/repos.jsonl)" ]; then
             git add state/repos.jsonl
             git commit -m "chore(state): update repos.jsonl (run ${{ github.run_id }})"
-            git push
+            git pull --rebase origin "${{ github.ref_name }}"
+            git push origin "${{ github.ref_name }}"
           else
             echo "No ledger changes to commit"
           fi
