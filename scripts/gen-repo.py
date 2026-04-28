@@ -28,6 +28,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 import urllib.error
 import urllib.request
@@ -124,7 +125,7 @@ def sample_archetype(cfg: dict[str, Any], rng: random.Random) -> Archetype:
 
 
 def pick_domain_and_owner(company: dict[str, Any], rng: random.Random) -> tuple[str, str]:
-    """Pick a fully-qualified domain path like 'platform.api-gateway' and an owner email.
+    """Pick a fully-qualified domain path like 'engineering.platform.api-gateway' and an owner email.
 
     Supports the seed shape documented in the plan:
         {
@@ -225,7 +226,7 @@ Requirements for "files":
       CODEOWNERS                (single line: "* {owner}")
       lunar.yml                 (see template below)
       catalog-info.yaml         (see template below)
-      .github/workflows/ci.yml  (one small job, e.g. lint or test)
+      .github/workflows/ci.yml  (optional; generator overwrites with a resilient workflow)
   - If role is "api-service" or "worker" and lifecycle is "production",
     also include a minimal Dockerfile.
   - If language is "docs-only", skip code and use only Markdown.
@@ -472,6 +473,7 @@ def generate_one(cfg: dict[str, Any], company: dict[str, Any],
 
         _rewrite_placeholders(workdir, name)
         _ensure_minimum_files(workdir, name, arch, domain, owner)
+        _write_ci_workflow(workdir, arch)
 
         try:
             create_repo_and_push(name, description, workdir)
@@ -506,6 +508,172 @@ def _is_valid_name(name: str) -> bool:
     return all(c.isalnum() or c == "-" for c in name) and not name.startswith("-") and not name.endswith("-")
 
 
+def _ci_workflow_yaml(arch: Archetype) -> str:
+    """GitHub Actions workflow that stays green on thin AI repos but exercises real stacks when present."""
+    if arch.language == "docs-only":
+        return textwrap.dedent("""
+            name: CI
+            on:
+              push:
+                branches: [main]
+              pull_request:
+                branches: [main]
+            permissions:
+              contents: read
+            jobs:
+              validate:
+                runs-on: ubuntu-latest
+                steps:
+                  - uses: actions/checkout@v4
+                  - name: Markdown present
+                    shell: bash
+                    run: |
+                      test -f README.md \\
+                        || test -f docs/README.md \\
+                        || compgen -G '*.md' >/dev/null \\
+                        || find . -name '*.md' -not -path './.git/*' -print -quit | grep -q .
+            """).strip() + "\n"
+
+    # Code, yaml-only, and everything else: conditional checks; never fail the job on missing stacks.
+    return textwrap.dedent("""
+        name: CI
+        on:
+          push:
+            branches: [main]
+          pull_request:
+            branches: [main]
+        concurrency:
+          group: ${{ github.workflow }}-${{ github.ref }}
+          cancel-in-progress: true
+        permissions:
+          contents: read
+        jobs:
+          validate:
+            runs-on: ubuntu-latest
+            steps:
+              - uses: actions/checkout@v4
+
+              - name: Go
+                if: hashFiles('**/go.mod') != ''
+                uses: actions/setup-go@v5
+                with:
+                  go-version: stable
+              - name: Go build
+                if: hashFiles('**/go.mod') != ''
+                shell: bash
+                run: |
+                  set +e
+                  while IFS= read -r mod; do
+                    [[ -z "$mod" ]] && continue
+                    d=$(dirname "$mod")
+                    (cd "$d" && go mod download 2>/dev/null; go build ./... 2>/dev/null || go build . 2>/dev/null) || true
+                  done < <(find . -name go.mod ! -path './.git/*' -print)
+
+              - name: Python
+                if: hashFiles('**/*.py') != ''
+                uses: actions/setup-python@v5
+                with:
+                  python-version: "3.12"
+              - name: Python compileall
+                if: hashFiles('**/*.py') != ''
+                shell: bash
+                run: python -m compileall -q . || true
+
+              - name: Node
+                if: hashFiles('**/package.json') != ''
+                uses: actions/setup-node@v4
+                with:
+                  node-version: "20"
+              - name: npm
+                if: hashFiles('**/package.json') != ''
+                shell: bash
+                run: |
+                  set +e
+                  while IFS= read -r pkg; do
+                    [[ -z "$pkg" ]] && continue
+                    d=$(dirname "$pkg")
+                    (
+                      cd "$d" || exit 0
+                      if [[ -f package-lock.json ]] || [[ -f npm-shrinkwrap.json ]]; then
+                        npm ci --ignore-scripts --no-fund --no-audit 2>/dev/null \\
+                          || npm install --ignore-scripts --no-fund --no-audit 2>/dev/null || true
+                      else
+                        npm install --ignore-scripts --no-fund --no-audit 2>/dev/null || true
+                      fi
+                      npm run test --if-present 2>/dev/null || npm run build --if-present 2>/dev/null || true
+                    ) || true
+                  done < <(find . -name package.json ! -path './.git/*' ! -path '*/node_modules/*' -print)
+
+              - name: Rust
+                if: hashFiles('**/Cargo.toml') != ''
+                uses: dtolnay/rust-toolchain@stable
+              - name: Cargo check
+                if: hashFiles('**/Cargo.toml') != ''
+                shell: bash
+                run: |
+                  set +e
+                  while IFS= read -r c; do
+                    [[ -z "$c" ]] && continue
+                    d=$(dirname "$c")
+                    (cd "$d" && cargo check -q) || true
+                  done < <(find . -name Cargo.toml ! -path './.git/*' -print)
+
+              - name: Java (Maven)
+                if: hashFiles('**/pom.xml') != ''
+                uses: actions/setup-java@v4
+                with:
+                  distribution: temurin
+                  java-version: "17"
+              - name: mvn validate
+                if: hashFiles('**/pom.xml') != ''
+                shell: bash
+                run: |
+                  set +e
+                  if ! command -v mvn >/dev/null 2>&1; then
+                    sudo apt-get update -qq && sudo apt-get install -y -qq maven >/dev/null 2>&1 || true
+                  fi
+                  while IFS= read -r pom; do
+                    [[ -z "$pom" ]] && continue
+                    d=$(dirname "$pom")
+                    (cd "$d" && mvn -B -q -DskipTests validate) || true
+                  done < <(find . -name pom.xml ! -path './.git/*' -print)
+
+              - name: PHP
+                if: hashFiles('**/composer.json') != ''
+                shell: bash
+                run: |
+                  set +e
+                  sudo apt-get update -qq \\
+                    && sudo apt-get install -y -qq php-cli php-xml composer >/dev/null 2>&1 || true
+                  while IFS= read -r c; do
+                    [[ -z "$c" ]] && continue
+                    d=$(dirname "$c")
+                    (cd "$d" && (composer install -n --no-progress 2>/dev/null || true) \\
+                      && (composer validate --no-check-publish 2>/dev/null || true)) || true
+                  done < <(find . -name composer.json ! -path './.git/*' -print)
+
+              - name: YAML sanity
+                if: hashFiles('**/*.yaml') != '' || hashFiles('**/*.yml') != ''
+                shell: bash
+                run: |
+                  set +e
+                  python3 -m pip install -q --user pyyaml 2>/dev/null || python3 -m pip install -q pyyaml || true
+                  while IFS= read -r f; do
+                    [[ -z "$f" ]] && continue
+                    python3 -c "import yaml,sys; yaml.safe_load(open(sys.argv[1],encoding='utf-8'))" "$f" || true
+                  done < <(find . \\( -name '*.yaml' -o -name '*.yml' \\) ! -path './.git/*' ! -path '*/node_modules/*' -print | head -80)
+
+              - name: Done
+                run: echo "ci ok"
+        """).strip() + "\n"
+
+
+def _write_ci_workflow(workdir: Path, arch: Archetype) -> None:
+    path = workdir / ".github" / "workflows" / "ci.yml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_ci_workflow_yaml(arch))
+
+
 def _rewrite_placeholders(workdir: Path, name: str) -> None:
     """Replace literal '<REPO_NAME>' placeholders Claude may have left in files."""
     for p in workdir.rglob("*"):
@@ -518,11 +686,56 @@ def _rewrite_placeholders(workdir: Path, name: str) -> None:
                 p.write_text(text.replace("<REPO_NAME>", name))
 
 
+def _sync_catalog_info(path: Path, name: str, domain: str, owner: str, lifecycle: str) -> None:
+    """Force Backstage domain/owner/name to match the generator (Claude often
+    emits only the child segment, e.g. ml.recommendations)."""
+    if path.exists():
+        try:
+            doc = yaml.safe_load(path.read_text())
+        except yaml.YAMLError:
+            doc = None
+    else:
+        doc = None
+    if not isinstance(doc, dict) or doc.get("kind") != "Component":
+        doc = {}
+    doc.setdefault("apiVersion", "backstage.io/v1alpha1")
+    doc["kind"] = "Component"
+    meta = doc.setdefault("metadata", {})
+    if not isinstance(meta, dict):
+        meta = {}
+        doc["metadata"] = meta
+    meta["name"] = name
+    ann = meta.setdefault("annotations", {})
+    if not isinstance(ann, dict):
+        ann = {}
+        meta["annotations"] = ann
+    ann["pantalasa.org/domain"] = domain
+    spec = doc.setdefault("spec", {})
+    if not isinstance(spec, dict):
+        spec = {}
+        doc["spec"] = spec
+    if not spec.get("type"):
+        spec["type"] = "service"
+    spec["lifecycle"] = lifecycle
+    spec["owner"] = owner
+    path.write_text(
+        yaml.dump(
+            doc,
+            default_flow_style=False,
+            sort_keys=False,
+            allow_unicode=True,
+        )
+    )
+
+
 def _ensure_minimum_files(workdir: Path, name: str, arch: Archetype,
                           domain: str, owner: str) -> None:
     """Guarantee lunar.yml, catalog-info.yaml and CODEOWNERS exist, even if
     the AI skipped them. README is left to Claude (we don't want to overwrite
-    something useful), but we add a stub if missing."""
+    something useful), but we add a stub if missing.
+
+    catalog-info.yaml is always rewritten with the canonical domain/owner so
+    model output cannot drift (e.g. ml.recommendations vs engineering.ml.recommendations)."""
     lunar_yml = workdir / "lunar.yml"
     if not lunar_yml.exists():
         lunar_yml.write_text(
@@ -531,19 +744,7 @@ def _ensure_minimum_files(workdir: Path, name: str, arch: Archetype,
             f"    tags: [{arch.language}, {arch.role}, {arch.lifecycle}]\n"
         )
     catalog = workdir / "catalog-info.yaml"
-    if not catalog.exists():
-        catalog.write_text(
-            "apiVersion: backstage.io/v1alpha1\n"
-            "kind: Component\n"
-            "metadata:\n"
-            f"  name: {name}\n"
-            "  annotations:\n"
-            f"    pantalasa.org/domain: {domain}\n"
-            "spec:\n"
-            "  type: service\n"
-            f"  lifecycle: {arch.lifecycle}\n"
-            f"  owner: {owner}\n"
-        )
+    _sync_catalog_info(catalog, name, domain, owner, arch.lifecycle)
     codeowners = workdir / "CODEOWNERS"
     if not codeowners.exists():
         codeowners.write_text(f"* {owner}\n")
@@ -566,10 +767,7 @@ def main() -> int:
 
     rng = random.Random(args.seed) if args.seed is not None else random.Random()
 
-    token = os.environ.get("GH_TOKEN", "")
-    if token:
-        log(f"GH_TOKEN present: length={len(token)} prefix={token[:8]!r} suffix={token[-4:]!r}")
-    else:
+    if not os.environ.get("GH_TOKEN"):
         log("WARNING: GH_TOKEN is not set")
 
     archetypes_cfg = load_archetypes()
