@@ -23,6 +23,8 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Any
+from urllib.parse import quote
 
 try:
     import yaml
@@ -33,6 +35,14 @@ except ImportError:
 SCRIPTS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPTS_DIR.parent
 COMPANY_FILE = REPO_ROOT / "seed" / "company.json"
+
+# Values not fixable by suffix / prefix rules (not in seed); map to a valid FQ domain.
+LEGACY_DOMAIN_REMAP: dict[str, str] = {
+    # Old pantalasa-cronos / demo catch-all; not a child in company.json.
+    "engineering.core": "engineering.platform.api-gateway",
+    # Legacy shorthand for merchant / UI area.
+    "dashboard": "engineering.merchant-dashboard",
+}
 
 
 def fq_domains_from_company(company: dict) -> set[str]:
@@ -75,8 +85,9 @@ def github_request(
         return e.code, None, detail
 
 
-def list_org_repos(org: str, token: str) -> list[str]:
-    names: list[str] = []
+def list_org_repos(org: str, token: str) -> list[dict[str, Any]]:
+    """Each dict: name, default_branch, archived."""
+    names: list[dict[str, Any]] = []
     page = 1
     while True:
         path = f"/orgs/{org}/repos?per_page=100&page={page}&type=all"
@@ -87,16 +98,24 @@ def list_org_repos(org: str, token: str) -> list[str]:
             break
         for repo in data:
             if isinstance(repo, dict) and repo.get("name"):
-                names.append(repo["name"])
+                names.append(
+                    {
+                        "name": repo["name"],
+                        "default_branch": repo.get("default_branch") or "main",
+                        "archived": bool(repo.get("archived")),
+                    }
+                )
         if len(data) < 100:
             break
         page += 1
     return names
 
 
-def fetch_catalog_info(org: str, repo: str, token: str) -> tuple[str | None, str | None]:
+def fetch_catalog_info(
+    org: str, repo: str, token: str, ref: str
+) -> tuple[str | None, str | None]:
     """Returns (domain_value, file_sha) or (None, None) if missing."""
-    path = f"/repos/{org}/{repo}/contents/catalog-info.yaml?ref=main"
+    path = f"/repos/{org}/{repo}/contents/catalog-info.yaml?ref={quote(ref, safe='')}"
     code, data, err = github_request("GET", path, token)
     if code == 404:
         return None, None
@@ -141,6 +160,9 @@ def canonical_domain(current: str, valid: set[str]) -> str | None:
     """Return replacement FQ domain, or None if already valid / unmappable."""
     if current in valid:
         return None
+    if current in LEGACY_DOMAIN_REMAP:
+        mapped = LEGACY_DOMAIN_REMAP[current]
+        return mapped if mapped in valid else None
     # e.g. ml.recommendations -> engineering.ml.recommendations
     m = _by_suffix(current, valid)
     if len(m) == 1:
@@ -171,10 +193,11 @@ def put_catalog_info(
     token: str,
     new_domain: str,
     sha: str,
+    ref: str,
     dry_run: bool,
 ) -> bool:
     path = f"/repos/{org}/{repo}/contents/catalog-info.yaml"
-    code, data, err = github_request("GET", path + "?ref=main", token)
+    code, data, err = github_request("GET", path + f"?ref={quote(ref, safe='')}", token)
     if code != 200 or not isinstance(data, dict):
         print(f"  FAIL {repo}: re-fetch {code}", flush=True)
         return False
@@ -209,6 +232,7 @@ def put_catalog_info(
     if dry_run:
         print(f"  DRY {repo}: would set domain -> {new_domain}", flush=True)
         return True
+    payload["branch"] = ref
     code2, _, err2 = github_request("PUT", path, token, payload)
     if code2 not in (200, 201):
         print(f"  FAIL {repo}: PUT {code2} {err2[:400]}", flush=True)
@@ -221,6 +245,11 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--org", default=os.environ.get("SIMULATOR_ORG", "pantalasa-cronos"))
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument(
+        "--include-archived",
+        action="store_true",
+        help="Attempt PUT on archived repos (usually fails with 403; default is skip).",
+    )
     args = ap.parse_args()
 
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
@@ -242,8 +271,14 @@ def main() -> int:
 
     fixed = 0
     skipped = 0
-    for name in sorted(repos):
-        cur, sha = fetch_catalog_info(args.org, name, token)
+    skipped_archived = 0
+    for r in sorted(repos, key=lambda x: x["name"]):
+        name = r["name"]
+        ref = r["default_branch"]
+        if r["archived"] and not args.include_archived:
+            skipped_archived += 1
+            continue
+        cur, sha = fetch_catalog_info(args.org, name, token, ref)
         if cur is None or sha is None:
             skipped += 1
             continue
@@ -253,10 +288,14 @@ def main() -> int:
                 print(f"  ??  {name}: domain={cur!r} (no single prefix match)", flush=True)
             skipped += 1
             continue
-        if put_catalog_info(args.org, name, token, new_d, sha, args.dry_run):
+        if put_catalog_info(args.org, name, token, new_d, sha, ref, args.dry_run):
             fixed += 1
 
-    print(f"Done. updated={fixed} skipped_or_ok={skipped} dry_run={args.dry_run}", flush=True)
+    print(
+        f"Done. updated={fixed} skipped_or_ok={skipped} skipped_archived={skipped_archived} "
+        f"dry_run={args.dry_run}",
+        flush=True,
+    )
     return 0
 
 
