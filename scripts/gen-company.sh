@@ -61,6 +61,8 @@ no fences) with this shape:
     },
     ...
   },
+  "first_names": ["<diverse given names>", ...],
+  "last_names": ["<diverse family names>", ...],
   "people": [
     {"email": "<first.last>@pantalasa.org",
      "name":  "<First Last>",
@@ -79,9 +81,11 @@ Constraints:
     platform, product, data, security, infra, payments, growth, ml, mobile, tooling.
   - Each top-level domain has 2-4 children (aim for roughly 30 total subdomains).
   - Slugs are kebab-case, lowercase, no spaces.
-  - Domain+subdomain strings in people[].domains use dot notation, e.g. "platform.api-gateway".
-  - Generate 30-50 people; distribute them across domains so most subdomains have
-    at least 1-2 people assigned.
+  - Domain+subdomain strings in people[].domains use dot notation, e.g. "engineering.platform.api-gateway".
+  - Generate 35-55 leadership people (titles, domain coverage); distribute so most
+    subdomains have at least 1-2 leaders assigned.
+  - Include first_names and last_names arrays with ~100-140 UNIQUE strings each
+    (mixed cultures, spellings) for downstream expansion to a ~1000-person org.
   - All emails end with @pantalasa.org.
   - commit_authors is a list of 10-15 plausible contributors re-used by the
     activity simulator for commit attribution.
@@ -148,12 +152,14 @@ obj = json.loads(text[start:end])
 print(json.dumps(obj, indent=2))
 ')
 
+EXPANDED=$(echo "$JSON" | TARGET_PEOPLE="${TARGET_PEOPLE:-1000}" python3 "$REPO_ROOT/scripts/expand-people.py" -)
+
 if [ "${DRY_RUN:-0}" = "1" ]; then
-    echo "$JSON"
+    echo "$EXPANDED"
     exit 0
 fi
 
-echo "$JSON" > "$OUT"
+echo "$EXPANDED" > "$OUT"
 echo "Wrote $OUT" >&2
 
 python3 -c "

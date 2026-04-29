@@ -5,12 +5,13 @@ name: Simulate activity
 
 on:
   schedule:
-    - cron: "0 * * * *"   # hourly
+    # Steadier load than a single hourly burst; batch size scales with fleet (see README).
+    - cron: "*/15 * * * *"
   workflow_dispatch:
     inputs:
       commits:
-        description: "Max commits to push in this run"
-        default: "50"
+        description: "Commits to push; 0 = auto from ledger size (vars COMMITS_*)."
+        default: "0"
       dry_run:
         description: "Log targets but do not push"
         type: boolean
@@ -34,6 +35,9 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GH_PAT_CRONOS_SIMULATOR }}
       SIMULATOR_ORG: ${{ vars.SIMULATOR_ORG || 'pantalasa-cronos' }}
+      COMMITS_SCALE_PCT: ${{ vars.COMMITS_SCALE_PCT }}
+      COMMITS_MIN: ${{ vars.COMMITS_MIN }}
+      COMMITS_PER_RUN: ${{ vars.COMMITS_PER_RUN }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -58,7 +62,21 @@ jobs:
       - name: Push synthetic commits
         run: |
           set -euo pipefail
-          ARGS=(--commits "${{ inputs.commits || vars.COMMITS_PER_RUN || '50' }}")
+          WANT="${{ inputs.commits }}"
+          if [ -z "${WANT}" ] || [ "${WANT}" = "0" ]; then
+            LEDGER="${GITHUB_WORKSPACE}/state/repos.jsonl"
+            LINES=$(wc -l < "${LEDGER}" | tr -d ' ')
+            PCT="${COMMITS_SCALE_PCT:-2}"
+            MIN_C="${COMMITS_MIN:-5}"
+            MAX_C="${COMMITS_PER_RUN:-80}"
+            COMMITS=$(( LINES * PCT / 100 ))
+            if [ "${COMMITS}" -lt "${MIN_C}" ]; then COMMITS=${MIN_C}; fi
+            if [ "${COMMITS}" -gt "${MAX_C}" ]; then COMMITS=${MAX_C}; fi
+            echo "Fleet (ledger lines): ${LINES} -> commits this run: ${COMMITS} (pct=${PCT} min=${MIN_C} max=${MAX_C})"
+            ARGS=(--commits "${COMMITS}")
+          else
+            ARGS=(--commits "${WANT}")
+          fi
           if [ "${{ inputs.dry_run }}" = "true" ]; then
             ARGS+=(--dry-run)
           fi

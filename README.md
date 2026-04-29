@@ -8,8 +8,9 @@ Two cron-driven workflows:
 - **Generate repos** — creates ~38 AI-authored repos per run, 4x per day
   (configurable) until `TARGET_REPOS` (default 1000) is reached.
 - **Simulate activity** — pushes Pareto-weighted `[skip ci]` commits across
-  the generated fleet every hour to exercise code collectors without
-  saturating CI runners.
+  the generated fleet on a **15-minute** schedule so load is steadier than a
+  single hourly burst. Batch size **scales with fleet size** (line count of
+  `state/repos.jsonl`, i.e. simulated repos the hub catalog sees from this org).
 
 See the full plan at
 [earthly-agent-config/plans/cronos-load-test-implementation.md](https://github.com/brandonSc/earthly-agent-config/blob/main/plans/cronos-load-test-implementation.md).
@@ -21,7 +22,7 @@ cronos-simulator/
 ├── .github/workflows/
 │   ├── seed-company.yml         manual: regenerate seed/company.json
 │   ├── generate-repos.yml       cron 4x/day + workflow_dispatch
-│   └── simulate-activity.yml    cron hourly + workflow_dispatch
+│   └── simulate-activity.yml    cron every 15m + workflow_dispatch
 ├── seed/
 │   ├── company.json             AI-generated persona (10 domains × 2-4 subs)
 │   └── archetypes.yml           weighted languages × roles × lifecycles
@@ -52,7 +53,9 @@ All are **optional**. Defaults in parens.
 | `SIMULATOR_ORG` | `pantalasa-cronos` | GitHub org to target. |
 | `TARGET_REPOS` | `1000` | `gen-repo.py` self-stops once the ledger has this many entries (unless `--force`). |
 | `REPOS_PER_RUN` | `38` | How many repos each scheduled `generate-repos` run creates. |
-| `COMMITS_PER_RUN` | `50` | Max commits per `simulate-activity` run. |
+| `COMMITS_SCALE_PCT` | `2` | Integer percent of ledger lines per run: `commits = lines × pct ÷ 100`, then clamped to `COMMITS_MIN`..`COMMITS_PER_RUN`. |
+| `COMMITS_MIN` | `5` | Floor after scaling (small fleet still gets steady activity). |
+| `COMMITS_PER_RUN` | `80` | Ceiling after scaling. For **Simulate activity** manual runs: workflow input **Commits** = `0` (default) uses this scaling; a positive number fixes the batch size for that run only. |
 | `SLEEP_MIN_SECONDS` / `SLEEP_MAX_SECONDS` | `30` / `60` | Sleep window between repo creations. |
 | `CLAUDE_MODEL` | `sonnet` | Model for `gen-repo.py` (`opus`, `sonnet`, or full model id). |
 | `CLAUDE_MAX_BUDGET_USD` | `0.50` | Per-invocation soft cap passed to `claude --max-budget-usd`. |
@@ -79,7 +82,9 @@ Set `ENABLED=false` (or `ACTIVITY_ENABLED=false`). Scheduled runs become no-ops 
 
 ### Changing cadence
 
-Edit the single `cron:` line in the workflow. Common alternatives are noted in-line. Preferable to leave `cron` on the default and use the repo-var kill switch for short-term pauses.
+Edit the `cron:` line in `simulate-activity.yml` (default: every 15 minutes). Prefer the kill switch `ACTIVITY_ENABLED=false` for short pauses instead of removing the schedule.
+
+**Rough daily volume (auto mode):** 96 runs/day at 15 minutes × `clamp(lines × pct / 100, min, max)` commits per run (e.g. 500 lines, 2%, min 5, max 80 → 10 commits/run → ~960 commits/day). Raise `COMMITS_PER_RUN` or lower the cron interval only if runners and hub capacity allow it.
 
 ## How the ledger works
 
