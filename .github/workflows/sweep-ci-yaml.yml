@@ -1,0 +1,55 @@
+name: Sweep CI yaml
+
+# One-shot maintenance workflow: walks every non-archived org repo and prepends
+# the lunar-ci-action step to .github/workflows/ci.yml if it is missing. Uses
+# git clone+push (not the Contents API) because OAuth-issued tokens cannot
+# write workflow files via the Contents API; GH_PAT_CRONOS_SIMULATOR is a
+# classic PAT whose `repo` scope already includes workflow updates.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Log changes but do not push"
+        type: boolean
+        default: false
+      include_archived:
+        description: "Attempt updates on archived repos (will fail)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: cronos-simulator-sweep-ci-yaml
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ secrets.GH_PAT_CRONOS_SIMULATOR }}
+      SIMULATOR_ORG: ${{ vars.SIMULATOR_ORG || 'pantalasa-cronos' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install pyyaml
+
+      - name: Configure git
+        run: |
+          git config --global user.name  "cronos-simulator"
+          git config --global user.email "simulator@pantalasa.org"
+
+      - name: Run sweep
+        run: |
+          set -euo pipefail
+          ARGS=()
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS+=(--dry-run); fi
+          if [ "${{ inputs.include_archived }}" = "true" ]; then ARGS+=(--include-archived); fi
+          python scripts/sweep-ci-yaml.py "${ARGS[@]}"

@@ -2,13 +2,13 @@
 """Inject the lunar-ci-action step at the top of .github/workflows/ci.yml in
 every non-archived simulator repo that doesn't already have it.
 
-Strategy: load the existing ci.yml, find each `jobs.<name>.steps:` list whose
-job runs on `ubuntu*` runners, and prepend the standard Lunar CI Agent step
-(uses earthly/lunar-ci-action@v1.1.5). Skip the file entirely if the step is
-already present anywhere. Skip archived repos (writes return 403).
+Uses `git clone --depth=1` + edit + push (over HTTPS with the token), because
+the GitHub REST Contents API refuses writes to .github/workflows/* unless the
+PAT has the `workflow` scope; classic PATs with only `repo` scope return 404.
+Git pushes are not subject to that scope check.
 
 Usage:
-  export GH_TOKEN=...
+  export GH_TOKEN=...                # PAT with `repo` scope
   python scripts/sweep-ci-yaml.py [--dry-run] [--include-archived] \\
                                   [--org pantalasa-cronos]
 """
@@ -16,15 +16,17 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import base64
 import json
 import os
+import shutil
+import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
 try:
     import yaml
@@ -34,6 +36,8 @@ except ImportError:
 
 LUNAR_ACTION_REF = "earthly/lunar-ci-action@v1.1.5"
 HUB_HOST = os.environ.get("LUNAR_HUB_HOST", "cronos.demo.earthly.dev")
+COMMIT_USER_NAME = os.environ.get("CRONOS_GIT_NAME", "cronos-simulator")
+COMMIT_USER_EMAIL = os.environ.get("CRONOS_GIT_EMAIL", "simulator@pantalasa.org")
 
 
 def gh_request(method: str, path: str, token: str,
@@ -82,25 +86,6 @@ def list_repos(org: str, token: str) -> list[dict]:
     return out
 
 
-def fetch_ci_yaml(org: str, repo: str, ref: str, token: str) -> tuple[str | None, str | None]:
-    path = f"/repos/{org}/{repo}/contents/.github/workflows/ci.yml?ref={quote(ref, safe='')}"
-    code, data, _ = gh_request("GET", path, token)
-    if code == 404 or not isinstance(data, dict):
-        return None, None
-    if code != 200:
-        return None, None
-    b64 = data.get("content")
-    sha = data.get("sha")
-    if not b64 or not sha:
-        return None, None
-    raw = base64.b64decode("".join(b64.split())).decode("utf-8")
-    return raw, sha
-
-
-def already_has_agent(yaml_text: str) -> bool:
-    return "earthly/lunar-ci-action" in yaml_text
-
-
 def lunar_step_dict() -> dict:
     return {
         "name": "Run Lunar CI Agent",
@@ -144,27 +129,71 @@ def inject_into_doc(doc: Any) -> tuple[Any, int]:
     return doc, modified
 
 
-def put_ci_yaml(org: str, repo: str, ref: str, sha: str, new_body: str,
-                token: str, dry_run: bool) -> bool:
-    if dry_run:
-        print(f"  DRY {repo}: would prepend Lunar CI Agent step", flush=True)
-        return True
-    encoded = base64.b64encode(new_body.encode("utf-8")).decode("ascii")
-    payload = {
-        "message": "ci: prepend lunar-ci-action step (hub instrumentation)",
-        "content": encoded,
-        "sha": sha,
-        "branch": ref,
-    }
-    code, _, err = gh_request(
-        "PUT", f"/repos/{org}/{repo}/contents/.github/workflows/ci.yml",
-        token, payload,
-    )
-    if code not in (200, 201):
-        print(f"  FAIL {repo}: PUT {code} {err[:300]}", flush=True)
-        return False
-    print(f"  OK   {repo}", flush=True)
-    return True
+def _run(cmd: list[str], cwd: Path | None = None,
+         check: bool = True) -> subprocess.CompletedProcess:
+    # Disable any system credential helpers (e.g. WSL inheriting a Windows
+    # one) so the inline x-access-token URL is the sole auth source.
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    if cmd and cmd[0] == "git":
+        cmd = [cmd[0], "-c", "credential.helper=", *cmd[1:]]
+    r = subprocess.run(cmd, cwd=str(cwd) if cwd else None,
+                       capture_output=True, text=True, env=env)
+    if check and r.returncode != 0:
+        out = (r.stderr or r.stdout).strip()[:300]
+        raise RuntimeError(f"{' '.join(cmd[:3])} failed: {out}")
+    return r
+
+
+def update_repo(org: str, repo: str, ref: str, token: str,
+                dry_run: bool) -> tuple[str, str]:
+    """Returns (status, detail) where status is one of:
+      ok, dry, missing, unchanged, invalid_yaml, fail."""
+    auth_url = f"https://x-access-token:{token}@github.com/{org}/{repo}.git"
+    with tempfile.TemporaryDirectory(prefix="sweep-ci-") as tmp:
+        workdir = Path(tmp) / repo
+        try:
+            _run(["git", "clone", "--depth=1", "--branch", ref, auth_url, str(workdir)])
+        except Exception as e:
+            return "fail", f"clone: {str(e).replace(token, '***')[:200]}"
+
+        ci = workdir / ".github" / "workflows" / "ci.yml"
+        if not ci.exists():
+            return "missing", "no ci.yml"
+
+        text = ci.read_text()
+        if "earthly/lunar-ci-action" in text:
+            return "unchanged", "agent already present"
+
+        try:
+            doc = yaml.safe_load(text)
+        except yaml.YAMLError as e:
+            return "invalid_yaml", str(e)[:120]
+
+        new_doc, modified = inject_into_doc(doc)
+        if modified == 0:
+            return "unchanged", "no ubuntu jobs"
+
+        new_body = yaml.dump(new_doc, default_flow_style=False, sort_keys=False)
+        ci.write_text(new_body)
+
+        if dry_run:
+            return "dry", f"would inject (jobs={modified})"
+
+        try:
+            _run(["git", "-c", f"user.name={COMMIT_USER_NAME}",
+                         "-c", f"user.email={COMMIT_USER_EMAIL}",
+                         "add", ".github/workflows/ci.yml"], cwd=workdir)
+            _run(["git", "-c", f"user.name={COMMIT_USER_NAME}",
+                         "-c", f"user.email={COMMIT_USER_EMAIL}",
+                         "commit", "-m",
+                         "ci: prepend lunar-ci-action step (hub instrumentation)"],
+                  cwd=workdir)
+            _run(["git", "push", "origin", f"HEAD:{ref}"], cwd=workdir)
+        except Exception as e:
+            return "fail", f"push: {str(e).replace(token, '***')[:200]}"
+
+    return "ok", f"jobs={modified}"
 
 
 def main() -> int:
@@ -178,44 +207,37 @@ def main() -> int:
     if not token:
         print("GH_TOKEN required", file=sys.stderr)
         return 1
+    if shutil.which("git") is None:
+        print("git CLI is required", file=sys.stderr)
+        return 1
 
     repos = list_repos(args.org, token)
     print(f"Repos in {args.org}: {len(repos)}", flush=True)
 
-    ok = fail = skipped = noop = 0
+    counts: dict[str, int] = {}
     for r in sorted(repos, key=lambda x: x["name"]):
         if r["archived"] and not args.include_archived:
-            skipped += 1
+            counts["archived"] = counts.get("archived", 0) + 1
             continue
-        text, sha = fetch_ci_yaml(args.org, r["name"], r["default_branch"], token)
-        if text is None or sha is None:
-            noop += 1  # no ci.yml present
-            continue
-        if already_has_agent(text):
-            noop += 1
-            continue
-        try:
-            doc = yaml.safe_load(text)
-        except yaml.YAMLError as e:
-            print(f"  WARN {r['name']}: invalid YAML ({e}); skipping", flush=True)
-            noop += 1
-            continue
-        new_doc, modified = inject_into_doc(doc)
-        if modified == 0:
-            noop += 1
-            continue
-        new_body = yaml.dump(new_doc, default_flow_style=False, sort_keys=False)
-        if put_ci_yaml(args.org, r["name"], r["default_branch"], sha, new_body, token, args.dry_run):
-            ok += 1
-        else:
-            fail += 1
+        status, detail = update_repo(
+            args.org, r["name"], r["default_branch"], token, args.dry_run
+        )
+        counts[status] = counts.get(status, 0) + 1
+        marker = {
+            "ok": "  OK  ",
+            "dry": "  DRY ",
+            "missing": "  --  ",
+            "unchanged": "  ==  ",
+            "invalid_yaml": "  ??  ",
+            "fail": "  FAIL",
+        }.get(status, "  ?   ")
+        if status in ("ok", "dry", "fail", "invalid_yaml"):
+            print(f"{marker} {r['name']}: {detail}", flush=True)
         time.sleep(0.05)
 
-    print(
-        f"Done. updated={ok} unchanged_or_missing={noop} fail={fail} skipped_archived={skipped} dry_run={args.dry_run}",
-        flush=True,
-    )
-    return 0 if fail == 0 else 1
+    print("Done.", " ".join(f"{k}={v}" for k, v in counts.items()),
+          f"dry_run={args.dry_run}", flush=True)
+    return 0 if counts.get("fail", 0) == 0 else 1
 
 
 if __name__ == "__main__":
