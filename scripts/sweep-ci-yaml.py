@@ -29,10 +29,19 @@ from pathlib import Path
 from typing import Any
 
 try:
-    import yaml
+    from ruamel.yaml import YAML
+    from ruamel.yaml.scalarstring import PreservedScalarString  # noqa: F401
 except ImportError:
-    print("Install PyYAML: pip install pyyaml", file=sys.stderr)
+    print("Install ruamel.yaml: pip install ruamel.yaml", file=sys.stderr)
     raise
+
+# Round-trip mode preserves comments, anchors, and (critically) the literal
+# string key `on:` instead of converting it to YAML 1.1 boolean True. PyYAML
+# does NOT preserve this and breaks every GitHub Actions workflow.
+_YAML = YAML(typ="rt")
+_YAML.preserve_quotes = True
+_YAML.indent(mapping=2, sequence=4, offset=2)
+_YAML.width = 4096
 
 LUNAR_ACTION_REF = "earthly/lunar-ci-action@v1.1.5"
 HUB_HOST = os.environ.get("LUNAR_HUB_HOST", "cronos.demo.earthly.dev")
@@ -145,6 +154,15 @@ def _run(cmd: list[str], cwd: Path | None = None,
     return r
 
 
+def _has_broken_on_key(text: str) -> bool:
+    # Detect workflows where the `on:` key got serialized as `true:` due to
+    # PyYAML's YAML 1.1 boolean handling on a previous pass.
+    for line in text.splitlines():
+        if line.startswith("true:"):
+            return True
+    return False
+
+
 def update_repo(org: str, repo: str, ref: str, token: str,
                 dry_run: bool) -> tuple[str, str]:
     """Returns (status, detail) where status is one of:
@@ -162,23 +180,48 @@ def update_repo(org: str, repo: str, ref: str, token: str,
             return "missing", "no ci.yml"
 
         text = ci.read_text()
-        if "earthly/lunar-ci-action" in text:
+        has_agent = "earthly/lunar-ci-action" in text
+        broken_on = _has_broken_on_key(text)
+
+        if has_agent and not broken_on:
             return "unchanged", "agent already present"
 
         try:
-            doc = yaml.safe_load(text)
-        except yaml.YAMLError as e:
+            from io import StringIO
+            doc = _YAML.load(text)
+        except Exception as e:
             return "invalid_yaml", str(e)[:120]
 
-        new_doc, modified = inject_into_doc(doc)
-        if modified == 0:
-            return "unchanged", "no ubuntu jobs"
+        # Normalize the `on:` key in case a previous pass turned it into bool True.
+        if isinstance(doc, dict) and True in doc and "on" not in doc:
+            doc["on"] = doc.pop(True)
 
-        new_body = yaml.dump(new_doc, default_flow_style=False, sort_keys=False)
+        if not has_agent:
+            new_doc, modified = inject_into_doc(doc)
+            if modified == 0:
+                # If we only needed to fix `on:`, that's still worth committing.
+                if not broken_on:
+                    return "unchanged", "no ubuntu jobs"
+                modified = 0
+        else:
+            new_doc = doc
+            modified = 0  # only fixing `on:`
+
+        buf = StringIO()
+        _YAML.dump(new_doc, buf)
+        new_body = buf.getvalue()
         ci.write_text(new_body)
 
+        commit_msg = (
+            "ci: prepend lunar-ci-action step (hub instrumentation)"
+            if not has_agent else
+            "ci: fix on: key (was serialized as true:)"
+        )
+        if broken_on and not has_agent:
+            commit_msg = "ci: prepend lunar-ci-action step + fix on: key"
+
         if dry_run:
-            return "dry", f"would inject (jobs={modified})"
+            return "dry", f"would write (jobs={modified}, broken_on={broken_on}, has_agent={has_agent})"
 
         try:
             _run(["git", "-c", f"user.name={COMMIT_USER_NAME}",
@@ -186,14 +229,13 @@ def update_repo(org: str, repo: str, ref: str, token: str,
                          "add", ".github/workflows/ci.yml"], cwd=workdir)
             _run(["git", "-c", f"user.name={COMMIT_USER_NAME}",
                          "-c", f"user.email={COMMIT_USER_EMAIL}",
-                         "commit", "-m",
-                         "ci: prepend lunar-ci-action step (hub instrumentation)"],
-                  cwd=workdir)
+                         "commit", "-m", commit_msg], cwd=workdir)
             _run(["git", "push", "origin", f"HEAD:{ref}"], cwd=workdir)
         except Exception as e:
             return "fail", f"push: {str(e).replace(token, '***')[:200]}"
 
-    return "ok", f"jobs={modified}"
+    suffix = "+fix-on" if broken_on else ""
+    return "ok", f"jobs={modified}{suffix}"
 
 
 def main() -> int:

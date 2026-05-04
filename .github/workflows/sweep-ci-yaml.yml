@@ -39,7 +39,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install deps
-        run: pip install pyyaml
+        run: pip install ruamel.yaml
 
       - name: Configure git
         run: |
