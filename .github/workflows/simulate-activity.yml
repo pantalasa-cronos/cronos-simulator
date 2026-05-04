@@ -38,6 +38,7 @@ jobs:
       COMMITS_SCALE_PCT: ${{ vars.COMMITS_SCALE_PCT }}
       COMMITS_MIN: ${{ vars.COMMITS_MIN }}
       COMMITS_PER_RUN: ${{ vars.COMMITS_PER_RUN }}
+      CI_SAMPLE_PCT: ${{ vars.CI_SAMPLE_PCT || '0' }}
     steps:
       - uses: actions/checkout@v4
         with:

@@ -155,8 +155,13 @@ def _run(cmd: list[str], cwd: Path | None = None, check: bool = True) -> subproc
     return r
 
 
-def push_commit(entry: LedgerEntry, rng: random.Random) -> bool:
-    """Clone, append a line to CHANGELOG.md, commit, push. Returns True on success."""
+def push_commit(entry: LedgerEntry, rng: random.Random,
+                trigger_ci: bool = False) -> bool:
+    """Clone, append a line to CHANGELOG.md, commit, push. Returns True on success.
+
+    trigger_ci=True omits the [skip ci] suffix so the component repo's CI workflow
+    runs (and the lunar-ci-action inside it reports to the hub). Sampling is done
+    by the caller via --ci-sample-pct."""
     token = os.environ.get("GH_TOKEN") or os.environ.get("GH_PAT") or ""
     if not token:
         log("GH_TOKEN not set; cannot clone/push")
@@ -184,7 +189,7 @@ def push_commit(entry: LedgerEntry, rng: random.Random) -> bool:
             else:
                 changelog.write_text(f"# Changelog\n\n{line}")
 
-            commit_msg = f"chore: {msg} [skip ci]"
+            commit_msg = f"chore: {msg}" if trigger_ci else f"chore: {msg} [skip ci]"
             for cmd in (
                 ["git", "-c", "user.name=cronos-simulator",
                          "-c", "user.email=simulator@pantalasa.org",
@@ -203,11 +208,25 @@ def push_commit(entry: LedgerEntry, rng: random.Random) -> bool:
     return True
 
 
+def _ci_sample_pct() -> int:
+    raw = os.environ.get("CI_SAMPLE_PCT", "0").strip()
+    try:
+        n = int(raw)
+    except ValueError:
+        n = 0
+    return max(0, min(100, n))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--commits", type=int, default=50, help="max commits to push this run")
     ap.add_argument("--dry-run", action="store_true", help="log targets without pushing")
     ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument(
+        "--ci-sample-pct", type=int, default=None,
+        help="0-100. Percentage of commits that should TRIGGER CI (omit [skip ci]). "
+             "Defaults to env CI_SAMPLE_PCT or 0 (all skip CI).",
+    )
     args = ap.parse_args()
 
     rng = random.Random(args.seed) if args.seed is not None else random.Random()
@@ -226,20 +245,29 @@ def main() -> int:
         log("no eligible repos; exiting")
         return 0
 
+    sample_pct = args.ci_sample_pct if args.ci_sample_pct is not None else _ci_sample_pct()
+    if sample_pct:
+        log(f"ci-sample-pct={sample_pct} (commits in this fraction will trigger CI)")
+
     if args.dry_run:
         for t in targets:
-            log(f"DRY would push to {ORG}/{t.name} (tier={t.tier})")
+            ci = "TRIGGER-CI" if rng.uniform(0, 100) < sample_pct else "skip-ci"
+            log(f"DRY would push to {ORG}/{t.name} (tier={t.tier}) [{ci}]")
         return 0
 
     succeeded = 0
+    triggered = 0
     for t in targets:
-        log(f"pushing to {ORG}/{t.name} (tier={t.tier})")
-        if push_commit(t, rng):
+        trigger_ci = rng.uniform(0, 100) < sample_pct
+        if trigger_ci:
+            triggered += 1
+        log(f"pushing to {ORG}/{t.name} (tier={t.tier}) trigger_ci={trigger_ci}")
+        if push_commit(t, rng, trigger_ci=trigger_ci):
             succeeded += 1
         time.sleep(rng.uniform(1.0, 3.0))  # gentle pacing
 
     save_ledger(entries)
-    log(f"done: pushed to {succeeded}/{len(targets)} repos")
+    log(f"done: pushed to {succeeded}/{len(targets)} repos; ci_triggered={triggered}")
     return 0 if succeeded > 0 else 1
 
 

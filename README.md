@@ -41,6 +41,7 @@ cronos-simulator/
 |------|---------|
 | `GH_PAT_CRONOS_SIMULATOR` | Classic PAT with `repo` + `admin:org` scopes; used to create/archive repos in `pantalasa-cronos` and to commit the ledger. |
 | `ANTHROPIC_API_KEY_CRONOS_SIMULATOR` | Dedicated Anthropic key (separate from bender's) so spend is isolated. Only needed for `seed-company` and `generate-repos`. |
+| `LUNAR_HUB_TOKEN` | Cronos hub token. `gen-repo.py` forwards this onto every newly-created repo as a repo-level Actions secret so each repo's `ci.yml` lunar-ci-action step can authenticate to `cronos.demo.earthly.dev`. Use `scripts/sweep-repo-secrets.py` to set it on repos that already exist. |
 
 ## Repository variables (Settings → Secrets and variables → Actions → Variables)
 
@@ -59,6 +60,7 @@ All are **optional**. Defaults in parens.
 | `SLEEP_MIN_SECONDS` / `SLEEP_MAX_SECONDS` | `30` / `60` | Sleep window between repo creations. |
 | `CLAUDE_MODEL` | `sonnet` | Model for `gen-repo.py` (`opus`, `sonnet`, or full model id). |
 | `CLAUDE_MAX_BUDGET_USD` | `0.50` | Per-invocation soft cap passed to `claude --max-budget-usd`. |
+| `CI_SAMPLE_PCT` | `0` | 0–100. Percentage of simulated commits that should **trigger CI** (omit `[skip ci]`) so the lunar-ci-action runs and reports to the hub. `0` = all commits skip CI (cheapest); `10` = roughly every 10th commit triggers CI. Tune for hub data realism vs. Actions minute spend. |
 
 ## Usage
 

@@ -35,6 +35,7 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GH_PAT_CRONOS_SIMULATOR }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY_CRONOS_SIMULATOR }}
+      LUNAR_HUB_TOKEN: ${{ secrets.LUNAR_HUB_TOKEN }}
       SIMULATOR_ORG: ${{ vars.SIMULATOR_ORG || 'pantalasa-cronos' }}
       TARGET_REPOS: ${{ vars.TARGET_REPOS || '1000' }}
       SLEEP_MIN_SECONDS: ${{ vars.SLEEP_MIN_SECONDS || '30' }}

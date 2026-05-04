@@ -412,6 +412,31 @@ def archive_repo(name: str) -> None:
         log(f"WARN: failed to archive {name}: {e}")
 
 
+def _set_lunar_secret(name: str) -> None:
+    """Set LUNAR_HUB_TOKEN on the new repo so its CI workflow's lunar-ci-action
+    can authenticate to the cronos hub. Uses the gh CLI which handles libsodium
+    encryption against the repo public key."""
+    value = os.environ.get("LUNAR_HUB_TOKEN", "")
+    if not value:
+        log(f"WARN: LUNAR_HUB_TOKEN not set; skipping repo secret for {name}")
+        return
+    try:
+        r = subprocess.run(
+            [
+                "gh", "secret", "set", "LUNAR_HUB_TOKEN",
+                "--repo", f"{ORG}/{name}",
+                "--app", "actions",
+                "--body", value,
+            ],
+            capture_output=True, text=True, timeout=30,
+        )
+        if r.returncode != 0:
+            err = (r.stderr or r.stdout).strip()[:300].replace(value, "***")
+            log(f"WARN: gh secret set failed for {name}: {err}")
+    except Exception as e:
+        log(f"WARN: secret set exception for {name}: {e}")
+
+
 def _github_post(path: str, body: dict[str, Any], token: str) -> dict[str, Any]:
     return _github_request("POST", path, body, token=token)
 
@@ -481,6 +506,8 @@ def generate_one(cfg: dict[str, Any], company: dict[str, Any],
             log(f"failed to create {ORG}/{name}: {e}")
             return None
 
+    _set_lunar_secret(name)
+
     if arch.lifecycle == "archived":
         archive_repo(name)
 
@@ -509,7 +536,10 @@ def _is_valid_name(name: str) -> bool:
 
 
 def _ci_workflow_yaml(arch: Archetype) -> str:
-    """GitHub Actions workflow that stays green on thin AI repos but exercises real stacks when present."""
+    """GitHub Actions workflow that stays green on thin AI repos but exercises real stacks when present.
+
+    The Lunar CI Agent step runs FIRST so it can attach via ptrace and instrument
+    every subsequent command in the job (see docs/install/agent-managed.md)."""
     if arch.language == "docs-only":
         return textwrap.dedent("""
             name: CI
@@ -524,6 +554,12 @@ def _ci_workflow_yaml(arch: Archetype) -> str:
               validate:
                 runs-on: ubuntu-latest
                 steps:
+                  - name: Run Lunar CI Agent
+                    uses: earthly/lunar-ci-action@v1.1.5
+                    env:
+                      LUNAR_HUB_TOKEN: ${{ secrets.LUNAR_HUB_TOKEN }}
+                      LUNAR_HUB_HOST: cronos.demo.earthly.dev
+
                   - uses: actions/checkout@v4
                   - name: Markdown present
                     shell: bash
@@ -551,6 +587,12 @@ def _ci_workflow_yaml(arch: Archetype) -> str:
           validate:
             runs-on: ubuntu-latest
             steps:
+              - name: Run Lunar CI Agent
+                uses: earthly/lunar-ci-action@v1.1.5
+                env:
+                  LUNAR_HUB_TOKEN: ${{ secrets.LUNAR_HUB_TOKEN }}
+                  LUNAR_HUB_HOST: cronos.demo.earthly.dev
+
               - uses: actions/checkout@v4
 
               - name: Go
