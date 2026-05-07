@@ -7,10 +7,13 @@ Two cron-driven workflows:
 
 - **Generate repos** — creates ~38 AI-authored repos per run, 4x per day
   (configurable) until `TARGET_REPOS` (default 1000) is reached.
-- **Simulate activity** — pushes Pareto-weighted `[skip ci]` commits across
-  the generated fleet on a **15-minute** schedule so load is steadier than a
-  single hourly burst. Batch size **scales with fleet size** (line count of
-  `state/repos.jsonl`, i.e. simulated repos the hub catalog sees from this org).
+- **Simulate activity** — pushes Pareto-weighted commits across the generated
+  fleet on a **15-minute** schedule so load is steadier than a single hourly
+  burst. A configurable fraction (`CI_SAMPLE_PCT`, default 50%) trigger the
+  component repo's CI workflow (and the lunar-ci-action inside it); the rest
+  carry `[skip ci]` to keep Actions spend bounded. Batch size **scales with
+  fleet size** (line count of `state/repos.jsonl`, i.e. simulated repos the
+  hub catalog sees from this org).
 
 See the full plan at
 [earthly-agent-config/plans/cronos-load-test-implementation.md](https://github.com/brandonSc/earthly-agent-config/blob/main/plans/cronos-load-test-implementation.md).
@@ -60,7 +63,7 @@ All are **optional**. Defaults in parens.
 | `SLEEP_MIN_SECONDS` / `SLEEP_MAX_SECONDS` | `30` / `60` | Sleep window between repo creations. |
 | `CLAUDE_MODEL` | `sonnet` | Model for `gen-repo.py` (`opus`, `sonnet`, or full model id). |
 | `CLAUDE_MAX_BUDGET_USD` | `0.50` | Per-invocation soft cap passed to `claude --max-budget-usd`. |
-| `CI_SAMPLE_PCT` | `0` | 0–100. Percentage of simulated commits that should **trigger CI** (omit `[skip ci]`) so the lunar-ci-action runs and reports to the hub. `0` = all commits skip CI (cheapest); `10` = roughly every 10th commit triggers CI. Tune for hub data realism vs. Actions minute spend. |
+| `CI_SAMPLE_PCT` | `50` | 0–100. Percentage of simulated commits that should **trigger CI** (omit `[skip ci]`) so the lunar-ci-action runs and reports to the hub. `0` = all commits skip CI (cheapest); `100` = every commit triggers CI. The **Simulate activity** workflow_dispatch also exposes a per-run override input. |
 
 ## Usage
 
@@ -111,6 +114,6 @@ The cronos-simulator writes both `lunar.yml` and `catalog-info.yaml` into every 
 
 ## Notes
 
-- Every simulated commit message ends with `[skip ci]` so the demo's self-hosted runners stay quiet. Lunar code collectors still fire on push.
+- A configurable fraction of simulated commits (`CI_SAMPLE_PCT`, default 50%) trigger the component repo's CI workflow on push, which runs the lunar-ci-action and reports to the hub; the rest carry `[skip ci]`. Lunar code collectors fire on push regardless of the suffix.
 - The `gen-repo.py` script tolerates per-repo failures and sleeps between repos to stay under GitHub & Anthropic rate limits.
 - No real user data is generated; all emails/names end with `@pantalasa.org`.

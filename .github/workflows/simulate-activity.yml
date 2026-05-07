@@ -1,7 +1,9 @@
 name: Simulate activity
 
-# Pushes Pareto-weighted [skip ci] commits across the simulated repo fleet.
-# See README.md for the full set of vars & secrets.
+# Pushes Pareto-weighted commits across the simulated repo fleet. A
+# configurable fraction (CI_SAMPLE_PCT, default 50) trigger the component
+# repo's CI workflow (and the lunar-ci-action inside it); the rest carry
+# [skip ci]. See README.md for the full set of vars & secrets.
 
 on:
   schedule:
@@ -20,6 +22,9 @@ on:
         description: "Run even if ACTIVITY_ENABLED=false"
         type: boolean
         default: false
+      ci_sample_pct:
+        description: "Percent of commits that trigger CI (0-100). Empty = use vars.CI_SAMPLE_PCT (default 50)."
+        default: ""
 
 concurrency:
   group: cronos-simulator-activity
@@ -38,7 +43,7 @@ jobs:
       COMMITS_SCALE_PCT: ${{ vars.COMMITS_SCALE_PCT }}
       COMMITS_MIN: ${{ vars.COMMITS_MIN }}
       COMMITS_PER_RUN: ${{ vars.COMMITS_PER_RUN }}
-      CI_SAMPLE_PCT: ${{ vars.CI_SAMPLE_PCT || '0' }}
+      CI_SAMPLE_PCT: ${{ inputs.ci_sample_pct != '' && inputs.ci_sample_pct || vars.CI_SAMPLE_PCT || '50' }}
     steps:
       - uses: actions/checkout@v4
         with:

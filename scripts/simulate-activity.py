@@ -3,9 +3,11 @@
 
 Reads ``state/repos.jsonl`` (populated by gen-repo.py), samples up to
 ``--commits`` eligible repos according to activity tier, and pushes a tiny
-CHANGELOG-append commit to each. Every commit message is prefixed with
-``[skip ci]`` so real CI workflows stay quiet; Lunar code collectors still
-fire on push regardless.
+CHANGELOG-append commit to each. A configurable fraction of commits
+(``--ci-sample-pct`` / ``CI_SAMPLE_PCT``) trigger the component repo's CI
+workflow on push (which runs the lunar-ci-action and reports to the hub);
+the rest carry a ``[skip ci]`` suffix to keep Actions spend bounded. Lunar
+code collectors fire on push regardless.
 
 The script is intentionally tolerant:
   * One bad repo never aborts the whole run.
@@ -209,11 +211,11 @@ def push_commit(entry: LedgerEntry, rng: random.Random,
 
 
 def _ci_sample_pct() -> int:
-    raw = os.environ.get("CI_SAMPLE_PCT", "0").strip()
+    raw = os.environ.get("CI_SAMPLE_PCT", "50").strip()
     try:
         n = int(raw)
     except ValueError:
-        n = 0
+        n = 50
     return max(0, min(100, n))
 
 
@@ -225,7 +227,7 @@ def main() -> int:
     ap.add_argument(
         "--ci-sample-pct", type=int, default=None,
         help="0-100. Percentage of commits that should TRIGGER CI (omit [skip ci]). "
-             "Defaults to env CI_SAMPLE_PCT or 0 (all skip CI).",
+             "Defaults to env CI_SAMPLE_PCT or 50.",
     )
     args = ap.parse_args()
 
@@ -246,8 +248,7 @@ def main() -> int:
         return 0
 
     sample_pct = args.ci_sample_pct if args.ci_sample_pct is not None else _ci_sample_pct()
-    if sample_pct:
-        log(f"ci-sample-pct={sample_pct} (commits in this fraction will trigger CI)")
+    log(f"ci-sample-pct={sample_pct} (commits in this fraction will trigger CI)")
 
     if args.dry_run:
         for t in targets:
